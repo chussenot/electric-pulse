@@ -1,0 +1,78 @@
+[env]
+_.file = ".env"
+
+# ── Build / test tasks ────────────────────────────────────────────────────
+# The C build logic lives in POSIX scripts under scripts/ so it stays readable
+# and reusable; mise tasks are thin wrappers. Trailing CLI args are forwarded
+# to the script (e.g. `mise run play-demo dark_moroder wav`).
+
+[tasks.clean]
+description = "Remove compiled binaries"
+run = "scripts/clean.sh"
+
+[tasks.test]
+description = "Run the full test suite (audio DSP, ABC, sequencer)"
+depends = ["test-audio", "test-abc", "test-audio-seq"]
+run = "echo 'All tests passed.'"
+
+[tasks.test-audio]
+description = "Build and run audio DSP regression tests"
+run = "scripts/test-audio.sh"
+
+[tasks.test-abc]
+description = "Build and run ABC parser + showcase regression tests"
+run = "scripts/test-abc.sh"
+
+[tasks.test-audio-seq]
+description = "Build and run sequencer regression tests"
+run = "scripts/test-audio-seq.sh"
+
+[tasks.bench-audio]
+description = "Build and run the audio microbenchmark"
+run = "scripts/bench-audio.sh"
+
+[tasks.render-demos]
+description = "Render showcase ABC demos and print deterministic metrics"
+run = "scripts/render-demos.sh"
+
+[tasks.play-demo]
+description = "Render a single demo and optionally export WAV: play-demo <demo> [wav]"
+run = "scripts/play-demo.sh"
+
+# ── Rust GUI tasks ────────────────────────────────────────────────────────
+
+[tasks.gui-check]
+description = "Run cargo check for the GUI crate"
+run = "cargo check"
+
+[tasks.gui-test]
+description = "Run cargo test for the GUI crate"
+run = "cargo test"
+
+[tasks.gui-run]
+description = "Run the GUI crate"
+run = "cargo run"
+
+[tasks.gui-system-deps]
+description = "Install Linux system packages needed to build the GUI (ALSA dev headers for cpal)"
+run = "sudo apt install -y libasound2-dev"
+
+# ── MCP server tasks ──────────────────────────────────────────────────────
+
+[tasks.mcp]
+description = "Build the MCP server (bin/electric-pulse-mcp)"
+run = "scripts/mcp.sh"
+
+[tasks.mcp-smoke]
+description = "Pipe a few JSON-RPC requests through the MCP server"
+run = "scripts/mcp-smoke.sh"
+
+# ── Jam (infinite-continuation player) tasks ──────────────────────────────
+
+[tasks.jam]
+description = "Build the infinite-continuation player (bin/electric-pulse-jam)"
+run = "scripts/jam.sh"
+
+[tasks.jam-play]
+description = "Stream variations through aplay (Linux): jam-play <demo> [seed] [section-seconds]"
+run = "scripts/jam-play.sh"

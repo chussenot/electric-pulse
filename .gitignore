@@ -1,0 +1,17 @@
+*.o
+*.dSYM/
+.DS_Store
+var/
+.env
+
+bin/bench-audio
+bin/play-demo
+bin/render-demos
+bin/wav/
+bin/test-audio-seq
+bin/test-abc
+bin/test-audio-dsp
+bin/electric-pulse-mcp
+bin/electric-pulse-jam
+build/
+/target

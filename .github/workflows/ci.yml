@@ -1,0 +1,54 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - name: Native clean
+        run: make clean
+      - name: Audio DSP regression
+        run: make test-audio
+      - name: ABC audio regression
+        run: make test-abc
+      - name: Full test suite
+        run: make test
+      - name: Audio benchmark build and smoke run
+        run: make bench-audio
+      - name: MCP server build
+        run: make mcp
+      - name: Jam player build
+        run: make jam
+
+  gui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - name: Install GUI runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libxkbcommon-x11-0 libasound2-dev
+      - name: GUI cargo check
+        run: make gui-check
+      - name: GUI tests
+        run: make gui-test
+      - name: GUI headless smoke run
+        env:
+          ELECTRIC_PULSE_GUI_BOOT_RENDER: "1"
+          ELECTRIC_PULSE_GUI_BOOT_DEMO: dark_moroder
+          ELECTRIC_PULSE_GUI_BOOT_FOCUS: waveform
+        run: |
+          set +e
+          timeout 20s xvfb-run -a cargo run
+          code=$?
+          set -e
+          if [ "$code" -ne 0 ] && [ "$code" -ne 124 ]; then
+            exit "$code"
+          fi

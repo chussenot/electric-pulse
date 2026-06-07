@@ -1,0 +1,117 @@
+#ifndef ELECTRIC_PULSE_AUDIO_SEQ_H
+#define ELECTRIC_PULSE_AUDIO_SEQ_H
+
+#include <stdint.h>
+#include "audio_dsp.h"
+
+#define SEQ_MAX_STEPS        64
+#define SEQ_MAX_TRACKS       8
+#define SEQ_MAX_PATTERNS     16
+#define SEQ_MAX_ARRANGEMENT  16
+#define SEQ_MAX_INSTRUMENTS  8
+#define SEQ_MAX_FX_BUSES     4
+#define SEQ_MAX_TIMELINE_STEPS (SEQ_MAX_STEPS * SEQ_MAX_ARRANGEMENT)
+
+#define SEQ_NOTE_REST (-1)
+
+typedef struct {
+    int enabled;
+    int delay_steps;
+    int delay_feedback;
+    int delay_mix;
+    int drive_amount;
+    int lowpass_amount;
+    int sidechain_amount;
+    int sidechain_release_ms;
+    int mix_percent;
+    int ladder_amount;     /* wet mix 0..100; 0 disables ladder */
+    int ladder_cutoff;     /* 1..100 (percent of Nyquist) */
+    int ladder_resonance;  /* 0..100 */
+} SeqFxBus;
+
+typedef struct {
+    int waveform;
+    int amplitude;
+    int pulse_width;
+    DspEnvelope envelope;
+    int detune_cents;
+    int vibrato_depth_cents;
+    int vibrato_rate;
+    int pwm_depth;
+    int pwm_rate;
+    int glide_ms;
+    int noise_mode;
+    int stacked_voices;
+    int fx_send;
+    int accent_gain;
+} SeqInstrument;
+
+typedef struct {
+    int16_t note;
+    uint8_t velocity;
+    uint8_t gate;
+    uint8_t accent;
+    uint8_t fx_trigger;
+} SeqStep;
+
+typedef struct {
+    int instrument;
+    int8_t automation[SEQ_MAX_STEPS];
+    SeqStep steps[SEQ_MAX_STEPS];
+} SeqTrack;
+
+typedef struct {
+    int length;
+    int track_count;
+    SeqTrack tracks[SEQ_MAX_TRACKS];
+} SeqPattern;
+
+typedef struct {
+    char title[128];
+    int tempo_bpm;
+    int swing_pct;
+    int steps_per_beat;
+    int instrument_count;
+    SeqInstrument instruments[SEQ_MAX_INSTRUMENTS];
+    int pattern_count;
+    SeqPattern patterns[SEQ_MAX_PATTERNS];
+    int arrangement_length;
+    uint8_t arrangement[SEQ_MAX_ARRANGEMENT];
+    int fx_bus_count;
+    SeqFxBus fx_buses[SEQ_MAX_FX_BUSES];
+} SeqSong;
+
+typedef struct {
+    int pattern_index;
+    int pattern_step;
+    int samples;
+} SeqTimelineStep;
+
+typedef struct {
+    int total_steps;
+    int total_samples;
+    int max_track_count;
+    SeqTimelineStep steps[SEQ_MAX_TIMELINE_STEPS];
+} SeqTimeline;
+
+typedef struct {
+    int active;
+    int track_index;
+    int instrument_index;
+    int note;
+    int velocity;
+    int accent;
+    int fx_trigger;
+    int gate_percent;
+    int duration_samples;
+    int step_index;
+} SeqNoteEvent;
+
+#define SEQ_MAX_STEP_EVENTS SEQ_MAX_TRACKS
+
+int seq_song_total_steps(const SeqSong *song);
+int seq_compile_timeline(const SeqSong *song, int sample_rate, SeqTimeline *timeline);
+int seq_collect_step_events(const SeqSong *song, const SeqTimeline *timeline,
+                            int absolute_step, SeqNoteEvent events[SEQ_MAX_STEP_EVENTS]);
+
+#endif

@@ -1,0 +1,156 @@
+PREFIX  ?= /usr/local
+CC      ?= cc
+CFLAGS  ?= -Wall -Wextra -O2 -std=c99 -D_DEFAULT_SOURCE -D_XOPEN_SOURCE=600
+LDFLAGS ?= -lm
+
+BENCH        = bin/bench-audio
+TEST_DSP     = bin/test-audio-dsp
+TEST_ABC_BIN = bin/test-abc
+TEST_SEQ_BIN = bin/test-audio-seq
+RENDER_DEMOS_BIN = bin/render-demos
+PLAY_DEMO_BIN = bin/play-demo
+MCP_BIN = bin/electric-pulse-mcp
+JAM_BIN = bin/electric-pulse-jam
+
+.PHONY: clean test test-audio test-abc test-audio-seq bench-audio render-demos play-demo gui-check gui-test gui-run mcp mcp-smoke jam jam-play help
+
+.DEFAULT_GOAL := help
+
+clean:
+	rm -f $(BENCH) $(TEST_DSP) $(TEST_ABC_BIN) $(TEST_SEQ_BIN) $(RENDER_DEMOS_BIN) $(PLAY_DEMO_BIN) $(MCP_BIN) $(JAM_BIN)
+
+test: test-audio test-abc test-audio-seq
+	@echo "All tests passed."
+
+test-audio:
+	@$(MAKE) --no-print-directory -B $(TEST_DSP)
+	@echo "Running audio DSP regression tests..."
+	@$(TEST_DSP)
+
+$(TEST_DSP): tests/test_audio_dsp.c src/audio_dsp.c src/audio_dsp.h
+	@mkdir -p bin
+	$(CC) $(CFLAGS) -o $@ tests/test_audio_dsp.c src/audio_dsp.c $(LDFLAGS)
+
+test-abc:
+	@$(MAKE) --no-print-directory -B $(TEST_ABC_BIN)
+	@echo "Running ABC parser tests..."
+	@$(TEST_ABC_BIN)
+
+$(TEST_ABC_BIN): tests/test_abc.c src/abc.c src/audio_dsp.c src/audio_seq.c src/audio_mix.c src/audio_fx.c src/audio_song_builtin.c src/audio_engine.c src/electric_pulse.h
+	@mkdir -p bin
+	$(CC) $(CFLAGS) -o $@ tests/test_abc.c src/abc.c src/audio_dsp.c src/audio_seq.c src/audio_mix.c src/audio_fx.c src/audio_song_builtin.c src/audio_engine.c $(LDFLAGS)
+
+test-audio-seq:
+	@$(MAKE) --no-print-directory -B $(TEST_SEQ_BIN)
+	@echo "Running sequencer regression tests..."
+	@$(TEST_SEQ_BIN)
+
+$(TEST_SEQ_BIN): tests/test_audio_seq.c src/audio_seq.c src/audio_mix.c src/audio_dsp.c src/audio_song_builtin.c src/audio_fx.c src/audio_engine.c src/audio_seq.h src/audio_mix.h src/audio_song_builtin.h src/audio_fx.h src/electric_pulse.h
+	@mkdir -p bin
+	$(CC) $(CFLAGS) -o $@ tests/test_audio_seq.c src/audio_seq.c src/audio_mix.c src/audio_dsp.c src/audio_song_builtin.c src/audio_fx.c src/audio_engine.c src/abc.c $(LDFLAGS)
+
+bench-audio: src/audio_dsp.c tests/bench_audio.c
+	@mkdir -p bin
+	$(CC) $(CFLAGS) -o $(BENCH) tests/bench_audio.c src/audio_dsp.c $(LDFLAGS)
+	@echo "Build complete: $(BENCH)"
+	@$(BENCH)
+
+render-demos:
+	@$(MAKE) --no-print-directory -B $(RENDER_DEMOS_BIN)
+	@$(RENDER_DEMOS_BIN)
+
+$(RENDER_DEMOS_BIN): tests/render_demos.c src/abc.c src/audio_mix.c src/audio_seq.c src/audio_dsp.c src/audio_fx.c src/audio_song_builtin.c src/audio_engine.c src/electric_pulse.h
+	@mkdir -p bin
+	$(CC) $(CFLAGS) -o $@ tests/render_demos.c src/abc.c src/audio_mix.c src/audio_seq.c src/audio_dsp.c src/audio_fx.c src/audio_song_builtin.c src/audio_engine.c $(LDFLAGS)
+
+play-demo:
+	@if [ -z "$(DEMO)" ]; then \
+		echo "Usage: make play-demo DEMO=name [WAV=1]"; \
+		echo "Examples:"; \
+		echo "  make play-demo DEMO=dark_moroder"; \
+		echo "  make play-demo DEMO=neon_nightdrive WAV=1"; \
+		exit 1; \
+	fi
+	@$(MAKE) --no-print-directory -B $(PLAY_DEMO_BIN)
+	@if [ "$(WAV)" = "1" ]; then \
+		mkdir -p bin/wav; \
+		$(PLAY_DEMO_BIN) "$(DEMO)" --wav "bin/wav/$(DEMO).wav"; \
+	else \
+		$(PLAY_DEMO_BIN) "$(DEMO)"; \
+	fi
+
+$(PLAY_DEMO_BIN): tests/play_demo.c src/abc.c src/audio_mix.c src/audio_seq.c src/audio_dsp.c src/audio_fx.c src/audio_song_builtin.c src/audio_engine.c src/electric_pulse.h
+	@mkdir -p bin
+	$(CC) $(CFLAGS) -o $@ tests/play_demo.c src/abc.c src/audio_mix.c src/audio_seq.c src/audio_dsp.c src/audio_fx.c src/audio_song_builtin.c src/audio_engine.c $(LDFLAGS)
+
+gui-check:
+	cargo check
+
+gui-test:
+	cargo test
+
+gui-run:
+	cargo run
+
+MCP_ENGINE_SRC = src/abc.c src/audio_mix.c src/audio_seq.c src/audio_dsp.c src/audio_fx.c src/audio_song_builtin.c src/audio_engine.c
+MCP_CFLAGS = -Wall -Wextra -O2 -std=c99 -D_DEFAULT_SOURCE -D_XOPEN_SOURCE=600 -Imcp/vendor/yyjson -Isrc
+# yyjson is third-party; suppress its warnings without diluting ours.
+MCP_VENDOR_CFLAGS = -O2 -std=c99 -w -Imcp/vendor/yyjson
+
+mcp: $(MCP_BIN)
+
+$(MCP_BIN): tools/electric_pulse_mcp.c $(MCP_ENGINE_SRC) src/electric_pulse.h mcp/vendor/yyjson/yyjson.c mcp/vendor/yyjson/yyjson.h
+	@mkdir -p bin build/mcp
+	$(CC) $(MCP_VENDOR_CFLAGS) -c mcp/vendor/yyjson/yyjson.c -o build/mcp/yyjson.o
+	$(CC) $(MCP_CFLAGS) -o $@ tools/electric_pulse_mcp.c $(MCP_ENGINE_SRC) build/mcp/yyjson.o -lm
+
+mcp-smoke: $(MCP_BIN)
+	@printf '%s\n%s\n%s\n' \
+	  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+	  '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+	  '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"electric_pulse_engine_caps","arguments":{}}}' \
+	  | $(MCP_BIN)
+
+JAM_ENGINE_SRC = src/abc.c src/audio_mix.c src/audio_seq.c src/audio_dsp.c src/audio_fx.c src/audio_song_builtin.c src/audio_engine.c src/audio_jam.c
+JAM_CFLAGS = -Wall -Wextra -O2 -std=c99 -D_DEFAULT_SOURCE -D_XOPEN_SOURCE=600 -Isrc
+
+jam: $(JAM_BIN)
+
+$(JAM_BIN): tools/electric_pulse_jam.c $(JAM_ENGINE_SRC) src/electric_pulse.h src/audio_jam.h
+	@mkdir -p bin
+	$(CC) $(JAM_CFLAGS) -o $@ tools/electric_pulse_jam.c $(JAM_ENGINE_SRC) -lm
+
+# Convenience: jam a named demo and pipe to aplay (Linux/ALSA).
+# Usage: make jam-play DEMO=three_chord_howl [SEED=42] [SECTION=30]
+jam-play: $(JAM_BIN)
+	@if [ -z "$(DEMO)" ]; then \
+		echo "Usage: make jam-play DEMO=name [SEED=N] [SECTION=secs]"; \
+		exit 1; \
+	fi
+	@$(JAM_BIN) "data/music/$(DEMO).abc" \
+	  $(if $(SEED),--seed $(SEED)) \
+	  $(if $(SECTION),--section-seconds $(SECTION)) \
+	  | aplay -q -f U8 -r 22050 -c 1
+
+help:
+	@echo "Electric Pulse - Audio Engine"
+	@echo ""
+	@echo "Usage: make <target>"
+	@echo ""
+	@echo "Targets:"
+	@echo "  clean      Remove compiled binaries"
+	@echo "  test       Run the full test suite (audio DSP, ABC, sequencer)"
+	@echo "  test-audio Build and run audio DSP regression tests"
+	@echo "  test-abc   Build and run ABC parser tests"
+	@echo "  test-audio-seq Build and run sequencer regression tests"
+	@echo "  bench-audio Build and run audio microbenchmark"
+	@echo "  render-demos Render showcase ABC demos and print deterministic metrics"
+	@echo "  play-demo DEMO=name [WAV=1] Render a single demo and optionally export WAV"
+	@echo "  gui-check  Run cargo check for the GUI crate"
+	@echo "  gui-test   Run cargo test for the GUI crate"
+	@echo "  gui-run    Run the GUI crate"
+	@echo "  mcp        Build the MCP server (bin/electric-pulse-mcp)"
+	@echo "  mcp-smoke  Pipe a few JSON-RPC requests through the MCP server"
+	@echo "  jam        Build the infinite-continuation player (bin/electric-pulse-jam)"
+	@echo "  jam-play DEMO=name [SEED=N] [SECTION=secs]   Stream variations through aplay (Linux)"
+	@echo "  help       Show this help message (default)"
