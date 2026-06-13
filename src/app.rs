@@ -160,6 +160,8 @@ pub struct ElectricPulseGuiApp {
     pattern_rename_buffer: String,
     step_clipboard: Option<editor::EditableStep>,
     jam: Option<JamRuntime>,
+    llm_prompt_buffer: String,
+    llm_last_response: String,
 }
 
 /// Active "infinite continuation" session. The JamSession lives in a
@@ -230,6 +232,8 @@ impl Default for ElectricPulseGuiApp {
             pattern_rename_buffer: String::new(),
             step_clipboard: None,
             jam: None,
+            llm_prompt_buffer: String::new(),
+            llm_last_response: String::new(),
         }
     }
 }
@@ -1218,6 +1222,29 @@ impl ElectricPulseGuiApp {
                 self.set_status(StatusTone::Warning, format!("MIDI EXPORT FAILED • {error}"))
             }
         }
+
+        fn run_llm_action(&mut self) {
+            let prompt = self.llm_prompt_buffer.trim();
+            if prompt.is_empty() {
+                self.llm_last_response.clear();
+                self.set_status(StatusTone::Warning, "LLM ACTION FAILED • ENTER A PROMPT");
+                return;
+            }
+
+            match ffi::llama_complete_prompt(prompt) {
+                Ok(response) => {
+                    self.llm_last_response = response.clone();
+                    self.set_status(
+                        StatusTone::Active,
+                        format!("LLM ACTION COMPLETE • {} CHARS", response.chars().count()),
+                    );
+                }
+                Err(error) => {
+                    self.llm_last_response.clear();
+                    self.set_status(StatusTone::Warning, format!("LLM ACTION FAILED • {error}"));
+                }
+            }
+        }
     }
 
     fn arrangement_move_cursor(&mut self, delta: isize) {
@@ -2033,6 +2060,9 @@ impl ElectricPulseGuiApp {
                         self.start_jam_for_selected();
                     }
                 }
+            }
+            if input.modifiers.command && input.key_pressed(egui::Key::L) {
+                self.run_llm_action();
             }
 
             if input.key_pressed(egui::Key::Tab) {
@@ -4830,6 +4860,22 @@ impl eframe::App for ElectricPulseGuiApp {
                     {
                         self.export_current_to_midi();
                     }
+                    let prompt_input = ui.add_sized(
+                        [320.0, 20.0],
+                        egui::TextEdit::singleline(&mut self.llm_prompt_buffer)
+                            .hint_text("LLM prompt"),
+                    );
+                    if prompt_input.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter))
+                    {
+                        self.run_llm_action();
+                    }
+                    if ui
+                        .button(RichText::new("LLM ACTION").monospace().size(12.0))
+                        .on_hover_text("Ctrl+L • call the optional llama.cpp FFI bridge")
+                        .clicked()
+                    {
+                        self.run_llm_action();
+                    }
                     if !self.editor_open_path.trim().is_empty() {
                         ui.label(
                             RichText::new(format!("PATH • {}", self.editor_open_path))
@@ -4839,6 +4885,15 @@ impl eframe::App for ElectricPulseGuiApp {
                         );
                     }
                 });
+                if !self.llm_last_response.trim().is_empty() {
+                    ui.add_space(4.0);
+                    ui.label(
+                        RichText::new(format!("LLM • {}", self.llm_last_response))
+                            .monospace()
+                            .size(11.0)
+                            .color(ACCENT),
+                    );
+                }
             });
 
         egui::TopBottomPanel::bottom("runtime_footer")
@@ -5489,6 +5544,30 @@ mod tests {
             matches!(app.active_dialog, Some(ActiveDialog::UnsavedChanges { .. })),
             "dirty close request should trigger unsaved dialog"
         );
+    }
+
+    #[test]
+    fn llm_action_requires_prompt() {
+        let mut app = ElectricPulseGuiApp::default();
+        app.run_llm_action();
+        assert_eq!(app.status.tone, StatusTone::Warning);
+        assert_eq!(app.status.text, "LLM ACTION FAILED • ENTER A PROMPT");
+        assert!(app.llm_last_response.is_empty());
+    }
+
+    #[cfg(not(feature = "llama_cpp_ffi"))]
+    #[test]
+    fn llm_action_reports_disabled_bridge_without_feature() {
+        let mut app = ElectricPulseGuiApp::default();
+        app.llm_prompt_buffer = "write a bassline".to_string();
+        app.run_llm_action();
+        assert_eq!(app.status.tone, StatusTone::Warning);
+        assert!(
+            app.status.text.contains("llama.cpp FFI bridge is disabled"),
+            "expected disabled-bridge error, got: {}",
+            app.status.text
+        );
+        assert!(app.llm_last_response.is_empty());
     }
 
     #[test]
