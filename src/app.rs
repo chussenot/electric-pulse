@@ -950,7 +950,18 @@ impl ElectricPulseGuiApp {
             return;
         }
 
-        match editor::load_editable_song_from_path(&path) {
+        let is_midi = path
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("mid") || ext.eq_ignore_ascii_case("midi"))
+            .unwrap_or(false);
+        let load_result = if is_midi {
+            editor::import_editable_song_from_midi_path(&path)
+        } else {
+            editor::load_editable_song_from_path(&path)
+        };
+
+        match load_result {
             Ok(song) => {
                 self.stop_playback(false);
                 self.editable_song = Some(song);
@@ -959,15 +970,29 @@ impl ElectricPulseGuiApp {
                 self.editor_state.selected_pattern = Some(0);
                 self.editor_state.selected_step = Some(0);
                 self.set_active_track_index(0);
-                self.editor_state.dirty = false;
-                self.editor_state.last_saved_path = Some(path.clone());
+                self.editor_state.dirty = is_midi;
+                self.editor_state.last_saved_path = if is_midi { None } else { Some(path.clone()) };
                 self.editor_state.last_error = None;
-                self.editor_open_path = path.to_string_lossy().to_string();
-                self.remember_recent_song(path.clone(), "OPENED EDITABLE SONG".to_string());
+                if is_midi {
+                    let suggested = self
+                        .editable_song
+                        .as_ref()
+                        .map(|song| self.suggest_user_song_path(&song.title))
+                        .unwrap_or_else(|| self.suggest_user_song_path("Imported MIDI"));
+                    self.editor_open_path = suggested.to_string_lossy().to_string();
+                    self.remember_recent_song(path.clone(), "IMPORTED MIDI SONG".to_string());
+                } else {
+                    self.editor_open_path = path.to_string_lossy().to_string();
+                    self.remember_recent_song(path.clone(), "OPENED EDITABLE SONG".to_string());
+                }
                 self.sync_arrangement_selection_with_pattern(false);
                 self.set_status(
                     StatusTone::Active,
-                    format!("EDIT MODE • OPENED {}", path.display()),
+                    if is_midi {
+                        format!("EDIT MODE • IMPORTED MIDI {}", path.display())
+                    } else {
+                        format!("EDIT MODE • OPENED {}", path.display())
+                    },
                 );
             }
             Err(error) => {
@@ -3868,7 +3893,7 @@ impl ElectricPulseGuiApp {
                     .resizable(false)
                     .show(ctx, |ui| {
                         ui.label(
-                            RichText::new("OPEN AN EDITABLE .ABC SONG")
+                            RichText::new("OPEN .ABC SONG OR IMPORT .MID/.MIDI")
                                 .monospace()
                                 .size(12.0),
                         );
@@ -3884,7 +3909,7 @@ impl ElectricPulseGuiApp {
                         ui.add_space(4.0);
                         let response = ui.add(
                             egui::TextEdit::singleline(&mut self.editor_open_path)
-                                .hint_text("ABSOLUTE PATH TO SONG .ABC")
+                                .hint_text("ABSOLUTE PATH TO .ABC OR .MID/.MIDI")
                                 .font(TextStyle::Monospace)
                                 .desired_width(540.0),
                         );
@@ -5308,6 +5333,35 @@ mod tests {
         }
     }
 
+    struct TempMidiFile(PathBuf);
+
+    impl TempMidiFile {
+        fn new(label: &str) -> Self {
+            Self(std::env::temp_dir().join(format!(
+                "electric-pulse-gui-{label}-{}.mid",
+                std::process::id()
+            )))
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempMidiFile {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.0);
+        }
+    }
+
+    fn simple_midi_bytes() -> Vec<u8> {
+        vec![
+            b'M', b'T', b'h', b'd', 0, 0, 0, 6, 0, 0, 0, 1, 1, 224, b'M', b'T', b'r', b'k', 0, 0,
+            0, 20, 0, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20, 0, 0x90, 60, 112, 0x83, 0x60, 0x80, 60,
+            0, 0, 0xFF, 0x2F, 0,
+        ]
+    }
+
     #[test]
     fn new_song_initializes_editable_lifecycle_state() {
         let mut app = ElectricPulseGuiApp::default();
@@ -5338,6 +5392,31 @@ mod tests {
         app.create_new_song();
         if let Some(song) = app.editable_song.as_mut() {
             song.title = "Roundtrip".to_string();
+        }
+
+        #[test]
+        fn open_midi_path_imports_song_and_marks_dirty() {
+            let mut app = ElectricPulseGuiApp::default();
+            app.user_song_root = std::env::temp_dir().join("electric-pulse-gui-midi-import");
+            let midi = TempMidiFile::new("open-midi");
+            fs::write(midi.path(), simple_midi_bytes()).expect("midi fixture should write");
+
+            app.open_editable_song_from_path(midi.path().to_path_buf());
+
+            assert_eq!(app.editor_state.mode, EditorMode::Edit);
+            assert!(app.effective_song_dirty(), "import should require save-as to abc");
+            assert!(
+                app.editor_open_path.ends_with(".abc"),
+                "import should suggest an .abc output path"
+            );
+            assert_eq!(
+                app.editable_song
+                    .as_ref()
+                    .and_then(|song| song.tracks.first())
+                    .and_then(|track| track.steps.first())
+                    .map(|step| step.active),
+                Some(true)
+            );
         }
         let path = TempSongFile::new("open-roundtrip");
         app.editor_open_path = path.path().to_string_lossy().to_string();
