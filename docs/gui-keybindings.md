@@ -10,6 +10,7 @@
 | `Ctrl+S` | Save editable song |
 | `Ctrl+Shift+S` | Save editable song as path |
 | `Ctrl+R` | Render (browser demo render or editable preview render) |
+| `Ctrl+E` | Export MIDI (browser selected demo or editable buffer) → `bin/midi/<stem>.mid` |
 | `Tab` / `Shift+Tab` | Cycle focus panels |
 | `D` `S` `W` `P` `E`/`G` `I` `F` | Direct focus (demo/stats/waveform/arrangement/pattern editor/instrument/fx) |
 | `Up` / `Down` | Demo select when browser focused, otherwise track select |

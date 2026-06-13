@@ -35,6 +35,7 @@ Verify with `claude mcp list` — `electric_pulse` should appear with status `Co
 | `electric_pulse_directive_help` | Reference card for the `%%` directives the parser understands and their parameter ranges. Use this instead of grepping headers when writing new songs. |
 | `electric_pulse_duration_calc` | Pure math: given `bpm`, `l_denom`, `total_steps`, returns the resulting duration in seconds plus whether it fits the engine's timeline cap. Plan a song's length before writing 8 voices' worth of bars. |
 | `electric_pulse_engine_caps` | All the `SEQ_MAX_*` / `ABC_MAX_*` / `SAMPLE_RATE_ABC` constants plus the ladder param ranges. Saves you a `grep -n MAX src/electric_pulse.h`. |
+| `electric_pulse_export_midi` | Export a `.abc` song to a Standard MIDI File (format 1) via the read-only `SeqSong`→`.mid` bridge (ADR-0003). Input: `path` (+ optional `out_path`, defaults to the input with a `.mid` extension). Returns `{ok, output_path, track_count, note_count, ticks_per_quarter, tempo_bpm}`. Off the render path — symbolic export only, never synthesizes audio. `SeqStep.note` maps 1:1 to MIDI note, velocity to 0..127, and L:/Q:/BPM to PPQ ticks (one timeline step = a quarter-note / `steps_per_beat`). For DAW interop and for feeding Magenta RealTime 2 externally. |
 
 ## Smoke test
 
@@ -58,6 +59,6 @@ Both sides must stay in sync — the `name` string is the lookup key. When passi
 - the existing engine is C99 with integer fixed-point math; the MCP layer links it directly with no FFI shim
 - one binary, no language runtime to install on the agent's host
 - yyjson handles the JSON-RPC envelope at ~1 GB/s without RTTI overhead
-- the tool surface is small (7 tools) and stable; no need for a heavyweight framework
+- the tool surface is small and stable; no need for a heavyweight framework
 
 See `docs/adr-0001-gui-direct-audio-playback.md` for the parallel decision in the GUI playback layer (also kept in the C engine path).

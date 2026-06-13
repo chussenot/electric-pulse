@@ -150,7 +150,7 @@ impl GuiAudioEngine {
     }
 }
 
-fn repository_root() -> PathBuf {
+pub fn repository_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .canonicalize()
         .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")))

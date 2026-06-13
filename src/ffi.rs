@@ -20,6 +20,19 @@ const ABC_MAX_ARRANGEMENT: usize = 32;
 const ABC_MAX_FX_BUSES: usize = 4;
 const SEQ_MAX_TRACKS: usize = 8;
 
+/// Mirror of the C `MidiExportStats` (`src/midi_export.h`). Filled by
+/// `midi_export_abc_file` with the counts actually written to the `.mid`.
+/// This bridge is OFF the render path (ADR-0003) — it never feeds back into
+/// `audio_engine_render_abc_file`, so it cannot perturb the showcase goldens.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct MidiExportStats {
+    pub track_count: c_int,
+    pub note_count: c_int,
+    pub ticks_per_quarter: c_int,
+    pub tempo_bpm: c_int,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AudioRenderStats {
@@ -187,6 +200,14 @@ unsafe extern "C" {
     fn audio_engine_free_buffer(buffer: *mut u8);
     fn abc_load(path: *const c_char, music: *mut AbcMusic) -> c_int;
 
+    // Read-only SeqSong -> Standard MIDI File bridge (ADR-0003). File-in /
+    // file-out, so the Rust side never owns AbcMusic/SeqSong memory across FFI.
+    fn midi_export_abc_file(
+        abc_path: *const c_char,
+        out_path: *const c_char,
+        out_stats: *mut MidiExportStats,
+    ) -> c_int;
+
     fn audio_jam_session_open(
         abc_path: *const c_char,
         seed: u64,
@@ -296,6 +317,50 @@ pub fn render_abc_file(path: &Path) -> Result<Vec<u8>, String> {
     }
 
     Ok(samples)
+}
+
+/// Export an `.abc` file to a Standard MIDI File via the read-only C bridge
+/// (`midi_export_abc_file`, ADR-0003). This parses `abc_path`, builds its
+/// `SeqSong`, and writes a `.mid` to `out_path` — it is OFF the render path,
+/// so it never touches `audio_engine_render_abc_file` or the showcase goldens.
+///
+/// `abc_path` must be an existing, readable file; `out_path` is the write
+/// target (its parent directory must already exist). Returns the C-reported
+/// [`MidiExportStats`] on success, or a human-readable error on the
+/// non-zero-is-error contract.
+pub fn export_abc_to_midi(abc_path: &Path, out_path: &Path) -> Result<MidiExportStats, String> {
+    let abc_str = normalized_demo_path(abc_path)?;
+    let c_abc = CString::new(abc_str)
+        .map_err(|_| format!("source path contains NUL byte: {}", abc_path.display()))?;
+
+    let out_str = out_path
+        .to_str()
+        .ok_or_else(|| format!("output path is not valid UTF-8: {}", out_path.display()))?;
+    let c_out = CString::new(out_str)
+        .map_err(|_| format!("output path contains NUL byte: {}", out_path.display()))?;
+
+    let mut stats = MidiExportStats::default();
+    let result = catch_unwind(AssertUnwindSafe(|| unsafe {
+        midi_export_abc_file(c_abc.as_ptr(), c_out.as_ptr(), &mut stats)
+    }))
+    .map_err(|_| {
+        format!(
+            "MIDI export panicked for {} -> {}",
+            abc_path.display(),
+            out_path.display()
+        )
+    })?;
+
+    if result != 0 {
+        return Err(format!(
+            "MIDI export failed ({}): {} -> {}",
+            result,
+            abc_path.display(),
+            out_path.display()
+        ));
+    }
+
+    Ok(stats)
 }
 
 /// Owned handle to a C-side jam session. Each `render_next()` call produces

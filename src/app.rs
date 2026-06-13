@@ -1113,6 +1113,88 @@ impl ElectricPulseGuiApp {
         let _ = std::fs::remove_file(tmp_path);
     }
 
+    /// Export the currently selected/loaded song to a Standard MIDI File via
+    /// the read-only C bridge (ADR-0003). In Browser mode this exports the
+    /// selected demo's `.abc`; in Edit/Preview mode it serializes the live
+    /// editable buffer to the same temp preview `.abc` the render path uses,
+    /// then exports that. Output lands at `<repo>/bin/midi/<stem>.mid`,
+    /// mirroring the CLI default (`scripts/export-midi.sh`). This is off the
+    /// render path: it never calls the audio engine and cannot perturb goldens.
+    fn export_current_to_midi(&mut self) {
+        // Resolve the source .abc path and an output stem for both modes.
+        let (source_path, stem, cleanup_temp) = if self.editor_state.mode == EditorMode::Browser {
+            let demo = self.selected_demo();
+            (demo.path.clone(), demo.key.clone(), false)
+        } else {
+            let Some(song) = self.editable_song.as_ref() else {
+                self.set_status(StatusTone::Warning, "MIDI EXPORT FAILED • NO EDITABLE SONG");
+                return;
+            };
+            let abc = match editor::serialize_editable_song(song) {
+                Ok(abc) => abc,
+                Err(error) => {
+                    self.set_status(
+                        StatusTone::Warning,
+                        format!("MIDI EXPORT FAILED • {error}"),
+                    );
+                    return;
+                }
+            };
+            let stem = sanitize_midi_stem(&song.title);
+            // Reuse the editor preview temp path (pid + thread-id suffix keeps
+            // it race-free under parallel `cargo test`).
+            let tmp_path = std::env::temp_dir().join(format!(
+                "electric-pulse-edit-preview-{}-{:?}.abc",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            if let Err(error) = std::fs::write(&tmp_path, abc) {
+                self.set_status(
+                    StatusTone::Warning,
+                    format!("MIDI EXPORT FAILED • WRITE ERROR • {error}"),
+                );
+                return;
+            }
+            (tmp_path, stem, true)
+        };
+
+        let out_dir = crate::audio_engine::repository_root()
+            .join("bin")
+            .join("midi");
+        if let Err(error) = std::fs::create_dir_all(&out_dir) {
+            if cleanup_temp {
+                let _ = std::fs::remove_file(&source_path);
+            }
+            self.set_status(
+                StatusTone::Warning,
+                format!("MIDI EXPORT FAILED • CANNOT CREATE bin/midi • {error}"),
+            );
+            return;
+        }
+        let out_path = out_dir.join(format!("{stem}.mid"));
+
+        let result = ffi::export_abc_to_midi(&source_path, &out_path);
+        if cleanup_temp {
+            let _ = std::fs::remove_file(&source_path);
+        }
+
+        match result {
+            Ok(stats) => self.set_status(
+                StatusTone::Active,
+                format!(
+                    "MIDI EXPORTED • {} NOTES ACROSS {} TRACKS @ {} BPM → {}",
+                    stats.note_count,
+                    stats.track_count,
+                    stats.tempo_bpm,
+                    out_path.display()
+                ),
+            ),
+            Err(error) => {
+                self.set_status(StatusTone::Warning, format!("MIDI EXPORT FAILED • {error}"))
+            }
+        }
+    }
+
     fn arrangement_move_cursor(&mut self, delta: isize) {
         let Some(song) = self.editable_song.as_ref() else {
             return;
@@ -1909,6 +1991,13 @@ impl ElectricPulseGuiApp {
                 }
             }
 
+            // Ctrl+E: export the selected demo (Browser) or the live editable
+            // buffer (Edit/Preview) to a Standard MIDI File. Off the render
+            // path (ADR-0003).
+            if input.modifiers.command && input.key_pressed(egui::Key::E) {
+                self.export_current_to_midi();
+            }
+
             // Ctrl+J: start jam mode on the selected demo (Browser only).
             // Esc stops it (handled via the existing stop_playback path).
             if input.modifiers.command && input.key_pressed(egui::Key::J) {
@@ -2113,7 +2202,9 @@ impl ElectricPulseGuiApp {
                     self.focus_panel(FocusArea::DemoBrowser);
                 }
             }
-            egui::Key::E => self.focus_panel(FocusArea::PatternEditor),
+            // Plain `E` focuses the pattern editor; `Ctrl+E` is MIDI export
+            // (handled in handle_keyboard), so don't also steal focus here.
+            egui::Key::E if !command => self.focus_panel(FocusArea::PatternEditor),
             egui::Key::G => {
                 if self.editor_state.mode != EditorMode::Browser
                     && self.runtime.focus == FocusArea::PatternEditor
@@ -4701,6 +4792,19 @@ impl eframe::App for ElectricPulseGuiApp {
                     {
                         self.render_editable_preview();
                     }
+                    // Export MIDI (ADR-0003, off the render path). Available
+                    // whenever there's a song to export: a selected demo in
+                    // Browser mode, or the live editable buffer otherwise.
+                    let can_export_midi = self.editor_state.mode == EditorMode::Browser
+                        || self.editable_song.is_some();
+                    if can_export_midi
+                        && ui
+                            .button(RichText::new("EXPORT MIDI").monospace().size(12.0))
+                            .on_hover_text("Ctrl+E • write a Standard MIDI File to bin/midi/")
+                            .clicked()
+                    {
+                        self.export_current_to_midi();
+                    }
                     if !self.editor_open_path.trim().is_empty() {
                         ui.label(
                             RichText::new(format!("PATH • {}", self.editor_open_path))
@@ -4814,6 +4918,32 @@ fn env_flag(name: &str) -> bool {
     env::var(name)
         .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
         .unwrap_or(false)
+}
+
+/// Derive a filesystem-safe MIDI filename stem from an editable song title.
+/// Keeps ASCII alphanumerics, collapses everything else to underscores, and
+/// falls back to "untitled" so the output path is always valid.
+fn sanitize_midi_stem(title: &str) -> String {
+    let mut stem: String = title
+        .trim()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    while stem.contains("__") {
+        stem = stem.replace("__", "_");
+    }
+    let stem = stem.trim_matches('_').to_string();
+    if stem.is_empty() {
+        "untitled".to_string()
+    } else {
+        stem
+    }
 }
 
 #[cfg(test)]
@@ -5280,5 +5410,48 @@ mod tests {
             matches!(app.active_dialog, Some(ActiveDialog::UnsavedChanges { .. })),
             "dirty close request should trigger unsaved dialog"
         );
+    }
+
+    #[test]
+    fn sanitize_midi_stem_is_filesystem_safe() {
+        assert_eq!(sanitize_midi_stem("Glass Anthem"), "glass_anthem");
+        assert_eq!(sanitize_midi_stem("  Dark / Moroder!! "), "dark_moroder");
+        assert_eq!(sanitize_midi_stem("already_ok-1"), "already_ok-1");
+        assert_eq!(sanitize_midi_stem(""), "untitled");
+        assert_eq!(sanitize_midi_stem("***"), "untitled");
+    }
+
+    #[test]
+    fn export_abc_to_midi_writes_a_standard_midi_file() {
+        // Exercise the full FFI bridge (parse + build + write) against a real
+        // demo. Parallel-safe temp path (pid + thread-id), per the editor
+        // preview convention.
+        let root = crate::audio_engine::repository_root();
+        let abc = root
+            .join("data")
+            .join("music")
+            .join("glass_anthem.abc");
+        assert!(abc.is_file(), "showcase demo glass_anthem.abc should exist");
+
+        let out = std::env::temp_dir().join(format!(
+            "electric-pulse-midi-test-{}-{:?}.mid",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_file(&out);
+
+        let stats = ffi::export_abc_to_midi(&abc, &out).expect("export should succeed");
+        assert!(stats.track_count > 0, "expected at least one MIDI track");
+        assert!(stats.note_count > 0, "expected at least one MIDI note");
+        assert!(stats.ticks_per_quarter > 0);
+        assert!(stats.tempo_bpm > 0);
+
+        let bytes = fs::read(&out).expect("midi file should be readable");
+        assert!(
+            bytes.starts_with(b"MThd"),
+            "output should be a Standard MIDI File (MThd header)"
+        );
+
+        let _ = fs::remove_file(&out);
     }
 }

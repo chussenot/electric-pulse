@@ -13,5 +13,7 @@ MCP_VENDOR_CFLAGS="-O2 -std=c99 -w -Imcp/vendor/yyjson"
 mkdir -p "$BIN_DIR" build/mcp
 # shellcheck disable=SC2086
 $CC $MCP_VENDOR_CFLAGS -c mcp/vendor/yyjson/yyjson.c -o build/mcp/yyjson.o
+# midi_export.c is the read-only SeqSong -> MIDI bridge backing the export_midi
+# tool; it lives off the render path (ADR-0003).
 # shellcheck disable=SC2086
-$CC $MCP_CFLAGS -o "$MCP_BIN" tools/electric_pulse_mcp.c $ENGINE_SRC build/mcp/yyjson.o -lm
+$CC $MCP_CFLAGS -o "$MCP_BIN" tools/electric_pulse_mcp.c $ENGINE_SRC src/midi_export.c build/mcp/yyjson.o -lm

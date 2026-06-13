@@ -9,15 +9,16 @@ TEST_ABC_BIN = bin/test-abc
 TEST_SEQ_BIN = bin/test-audio-seq
 RENDER_DEMOS_BIN = bin/render-demos
 PLAY_DEMO_BIN = bin/play-demo
+EXPORT_MIDI_BIN = bin/export-midi
 MCP_BIN = bin/electric-pulse-mcp
 JAM_BIN = bin/electric-pulse-jam
 
-.PHONY: clean test test-audio test-abc test-audio-seq bench-audio render-demos play-demo gui-check gui-test gui-run mcp mcp-smoke jam jam-play help
+.PHONY: clean test test-audio test-abc test-audio-seq bench-audio render-demos play-demo export-midi gui-check gui-test gui-run mcp mcp-smoke jam jam-play help
 
 .DEFAULT_GOAL := help
 
 clean:
-	rm -f $(BENCH) $(TEST_DSP) $(TEST_ABC_BIN) $(TEST_SEQ_BIN) $(RENDER_DEMOS_BIN) $(PLAY_DEMO_BIN) $(MCP_BIN) $(JAM_BIN)
+	rm -f $(BENCH) $(TEST_DSP) $(TEST_ABC_BIN) $(TEST_SEQ_BIN) $(RENDER_DEMOS_BIN) $(PLAY_DEMO_BIN) $(EXPORT_MIDI_BIN) $(MCP_BIN) $(JAM_BIN)
 
 test: test-audio test-abc test-audio-seq
 	@echo "All tests passed."
@@ -83,6 +84,14 @@ $(PLAY_DEMO_BIN): tests/play_demo.c src/abc.c src/audio_mix.c src/audio_seq.c sr
 	@mkdir -p bin
 	$(CC) $(CFLAGS) -o $@ tests/play_demo.c src/abc.c src/audio_mix.c src/audio_seq.c src/audio_dsp.c src/audio_fx.c src/audio_song_builtin.c src/audio_engine.c $(LDFLAGS)
 
+# Read-only SeqSong -> MIDI exporter (ADR-0003). Off the render path: it links
+# the parser/sequencer sources only to build a SeqSong, never the audio engine.
+export-midi: $(EXPORT_MIDI_BIN)
+
+$(EXPORT_MIDI_BIN): tests/export_midi.c src/midi_export.c src/abc.c src/audio_mix.c src/audio_seq.c src/audio_dsp.c src/audio_fx.c src/audio_song_builtin.c src/audio_engine.c src/midi_export.h src/electric_pulse.h
+	@mkdir -p bin
+	$(CC) $(CFLAGS) -o $@ tests/export_midi.c src/midi_export.c src/abc.c src/audio_mix.c src/audio_seq.c src/audio_dsp.c src/audio_fx.c src/audio_song_builtin.c src/audio_engine.c $(LDFLAGS)
+
 gui-check:
 	cargo check
 
@@ -92,14 +101,14 @@ gui-test:
 gui-run:
 	cargo run
 
-MCP_ENGINE_SRC = src/abc.c src/audio_mix.c src/audio_seq.c src/audio_dsp.c src/audio_fx.c src/audio_song_builtin.c src/audio_engine.c
+MCP_ENGINE_SRC = src/abc.c src/audio_mix.c src/audio_seq.c src/audio_dsp.c src/audio_fx.c src/audio_song_builtin.c src/audio_engine.c src/midi_export.c
 MCP_CFLAGS = -Wall -Wextra -O2 -std=c99 -D_DEFAULT_SOURCE -D_XOPEN_SOURCE=600 -Imcp/vendor/yyjson -Isrc
 # yyjson is third-party; suppress its warnings without diluting ours.
 MCP_VENDOR_CFLAGS = -O2 -std=c99 -w -Imcp/vendor/yyjson
 
 mcp: $(MCP_BIN)
 
-$(MCP_BIN): tools/electric_pulse_mcp.c $(MCP_ENGINE_SRC) src/electric_pulse.h mcp/vendor/yyjson/yyjson.c mcp/vendor/yyjson/yyjson.h
+$(MCP_BIN): tools/electric_pulse_mcp.c $(MCP_ENGINE_SRC) src/electric_pulse.h src/midi_export.h mcp/vendor/yyjson/yyjson.c mcp/vendor/yyjson/yyjson.h
 	@mkdir -p bin build/mcp
 	$(CC) $(MCP_VENDOR_CFLAGS) -c mcp/vendor/yyjson/yyjson.c -o build/mcp/yyjson.o
 	$(CC) $(MCP_CFLAGS) -o $@ tools/electric_pulse_mcp.c $(MCP_ENGINE_SRC) build/mcp/yyjson.o -lm
@@ -146,6 +155,7 @@ help:
 	@echo "  bench-audio Build and run audio microbenchmark"
 	@echo "  render-demos Render showcase ABC demos and print deterministic metrics"
 	@echo "  play-demo DEMO=name [WAV=1] Render a single demo and optionally export WAV"
+	@echo "  export-midi Build the read-only SeqSong -> MIDI exporter (bin/export-midi)"
 	@echo "  gui-check  Run cargo check for the GUI crate"
 	@echo "  gui-test   Run cargo test for the GUI crate"
 	@echo "  gui-run    Run the GUI crate"

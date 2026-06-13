@@ -39,6 +39,10 @@ run = "scripts/render-demos.sh"
 description = "Render a single demo and optionally export WAV: play-demo <demo> [wav]"
 run = "scripts/play-demo.sh"
 
+[tasks.export-midi]
+description = "Export a demo to a Standard MIDI File (read-only, off the render path): export-midi <name|path.abc> [out.mid]"
+run = "scripts/export-midi.sh"
+
 # ── Rust GUI tasks ────────────────────────────────────────────────────────
 
 [tasks.gui-check]

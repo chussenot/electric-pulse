@@ -10,6 +10,10 @@ fn main() {
         "src/audio_song_builtin.c",
         "src/audio_jam.c",
         "src/abc.c",
+        // Read-only SeqSong -> Standard MIDI File exporter (ADR-0003).
+        // Off the render path; compiled in so the GUI can call
+        // midi_export_abc_file over FFI.
+        "src/midi_export.c",
     ];
 
     for file in c_sources {
@@ -23,6 +27,7 @@ fn main() {
     println!("cargo:rerun-if-changed=src/audio_fx.h");
     println!("cargo:rerun-if-changed=src/audio_song_builtin.h");
     println!("cargo:rerun-if-changed=src/audio_jam.h");
+    println!("cargo:rerun-if-changed=src/midi_export.h");
 
     let mut build = cc::Build::new();
     build

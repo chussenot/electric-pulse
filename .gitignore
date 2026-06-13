@@ -13,5 +13,7 @@ bin/test-abc
 bin/test-audio-dsp
 bin/electric-pulse-mcp
 bin/electric-pulse-jam
+bin/export-midi
+bin/midi/
 build/
 /target

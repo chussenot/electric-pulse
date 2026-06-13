@@ -30,6 +30,7 @@
 #include "electric_pulse.h"
 #include "audio_engine.h"
 #include "audio_seq.h"
+#include "midi_export.h"
 
 #define MCP_PROTOCOL_VERSION "2024-11-05"
 #define SERVER_NAME          "electric_pulse"
@@ -463,6 +464,23 @@ static void handle_tools_list(yyjson_val *id)
         "ABC_MAX_VOICES, ABC_MAX_NOTES, ABC_MAX_FX_BUSES, "
         "SEQ_MAX_TIMELINE_STEPS, SAMPLE_RATE_ABC, and the ladder param "
         "ranges.");
+
+    t = add_tool_def(doc, tools, "electric_pulse_export_midi",
+        "Export an ABC song to a Standard MIDI File (format 1) via the "
+        "read-only SeqSong->MIDI bridge (ADR-0003). This is OFF the render "
+        "path: it walks step data only and never synthesizes audio, so it is "
+        "deterministic and adds no engine dependency. SeqStep.note maps 1:1 "
+        "to MIDI note number and velocity to 0..127; timing maps L:/Q:/BPM to "
+        "PPQ ticks (one timeline step = a quarter-note / steps_per_beat). One "
+        "MTrk per voice plus a conductor track with the tempo. Useful for DAW "
+        "interop and for feeding Magenta RealTime 2 externally. Output JSON: "
+        "{ok, output_path, track_count, note_count, ticks_per_quarter, "
+        "tempo_bpm}.");
+    add_prop(doc, t, "path", "string",
+             "Path to a .abc file. Absolute or relative to the project root.", 1);
+    add_prop(doc, t, "out_path", "string",
+             "Destination .mid path. Defaults to the input path with its "
+             "extension replaced by .mid.", 0);
 
     yyjson_mut_obj_add_val(doc, result, "tools", tools);
     write_envelope(id, doc, result, 0);
@@ -1105,6 +1123,82 @@ static void tool_engine_caps(yyjson_val *id, yyjson_val *args)
 }
 
 /* ============================================================
+ *   tool: electric_pulse_export_midi
+ *
+ *   Read-only SeqSong -> .mid bridge (ADR-0003). Off the render path:
+ *   abc_load -> abc_build_seq_song -> midi_export_seq_song. Never calls
+ *   audio_engine_render_*.
+ * ============================================================ */
+
+static void tool_export_midi(yyjson_val *id, yyjson_val *args)
+{
+    const char *path = yyjson_get_str(yyjson_obj_get(args, "path"));
+    if (!path) {
+        write_jsonrpc_error(id, ERR_PARAMS, "missing 'path' argument");
+        return;
+    }
+    const char *out_arg = yyjson_get_str(yyjson_obj_get(args, "out_path"));
+
+    /* Derive a default output path by swapping the extension for .mid when the
+     * caller didn't supply one. out_path is a loop-/stack-local buffer, so it
+     * MUST be added with add_strcpy below (yyjson stores str pointers without
+     * copying — see mcp/README.md). */
+    char out_path[1024];
+    if (out_arg && *out_arg) {
+        snprintf(out_path, sizeof(out_path), "%s", out_arg);
+    } else {
+        const char *dot = strrchr(path, '.');
+        const char *slash = strrchr(path, '/');
+        size_t stem_len;
+        if (dot && (!slash || dot > slash))
+            stem_len = (size_t)(dot - path);
+        else
+            stem_len = strlen(path);
+        if (stem_len > sizeof(out_path) - 5) stem_len = sizeof(out_path) - 5;
+        memcpy(out_path, path, stem_len);
+        out_path[stem_len] = '\0';
+        snprintf(out_path + stem_len, sizeof(out_path) - stem_len, ".mid");
+    }
+
+    AbcMusic music;
+    if (abc_load(path, &music) != 0) {
+        send_tool_text_error(id, "failed to parse ABC file");
+        return;
+    }
+
+    SeqSong song;
+    if (abc_build_seq_song(&music, &song) != 0) {
+        send_tool_text_error(id, "failed to build SeqSong from ABC "
+                                 "(check voice/arrangement alignment)");
+        return;
+    }
+
+    MidiExportStats stats;
+    if (midi_export_seq_song(&song, out_path, &stats) != 0) {
+        send_tool_text_error(id, "MIDI export failed (no renderable steps "
+                                 "or file write error)");
+        return;
+    }
+
+    yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
+    yyjson_mut_val *root = yyjson_mut_obj(doc);
+    yyjson_mut_obj_add_bool(doc, root, "ok", true);
+    yyjson_mut_obj_add_str(doc, root, "path", path);
+    /* out_path is stack-local: copy it into the doc. */
+    yyjson_mut_obj_add_strcpy(doc, root, "output_path", out_path);
+    yyjson_mut_obj_add_str(doc, root, "title", music.title);
+    yyjson_mut_obj_add_int(doc, root, "track_count", stats.track_count);
+    yyjson_mut_obj_add_int(doc, root, "note_count", stats.note_count);
+    yyjson_mut_obj_add_int(doc, root, "ticks_per_quarter", stats.ticks_per_quarter);
+    yyjson_mut_obj_add_int(doc, root, "tempo_bpm", stats.tempo_bpm);
+    yyjson_mut_obj_add_str(doc, root, "format", "Standard MIDI File, format 1");
+    yyjson_mut_obj_add_str(doc, root, "note",
+        "Off the render path (ADR-0003): deterministic symbolic export, no "
+        "audio synthesized. Feed to Magenta RealTime 2 externally.");
+    send_tool_payload(id, doc, root, 0);
+}
+
+/* ============================================================
  *   tools/call dispatcher
  * ============================================================ */
 
@@ -1127,6 +1221,7 @@ static void handle_tools_call(yyjson_val *id, yyjson_val *params)
     else if (strcmp(n, "electric_pulse_directive_help") == 0) tool_directive_help(id, args);
     else if (strcmp(n, "electric_pulse_duration_calc") == 0)  tool_duration_calc(id, args);
     else if (strcmp(n, "electric_pulse_engine_caps") == 0)    tool_engine_caps(id, args);
+    else if (strcmp(n, "electric_pulse_export_midi") == 0)    tool_export_midi(id, args);
     else {
         char msg[128];
         snprintf(msg, sizeof(msg), "unknown tool: %s", n);
