@@ -1,5 +1,6 @@
 pub mod abc_load;
 pub mod abc_save;
+pub mod midi_import;
 pub mod model;
 pub mod state;
 pub mod validation;
@@ -7,6 +8,7 @@ pub mod validation;
 #[allow(unused_imports)]
 pub use abc_load::{build_editable_song_from_raw, load_editable_song_from_path};
 pub use abc_save::{save_editable_song_to_path, serialize_editable_song};
+pub use midi_import::import_editable_song_from_midi_path;
 #[allow(unused_imports)]
 pub use model::{
     EditableArrangement, EditableArrangementBlock, EditableFxBus, EditableInstrument, EditablePattern,

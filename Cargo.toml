@@ -3,6 +3,10 @@ name = "gui"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+llama_cpp_ffi = []
+
 [dependencies]
 cpal = "0.17.3"
 eframe = { version = "0.29", features = ["__screenshot", "glow"] }

@@ -160,6 +160,8 @@ pub struct ElectricPulseGuiApp {
     pattern_rename_buffer: String,
     step_clipboard: Option<editor::EditableStep>,
     jam: Option<JamRuntime>,
+    llm_prompt_buffer: String,
+    llm_last_response: String,
 }
 
 /// Active "infinite continuation" session. The JamSession lives in a
@@ -230,6 +232,8 @@ impl Default for ElectricPulseGuiApp {
             pattern_rename_buffer: String::new(),
             step_clipboard: None,
             jam: None,
+            llm_prompt_buffer: String::new(),
+            llm_last_response: String::new(),
         }
     }
 }
@@ -277,7 +281,10 @@ impl ElectricPulseGuiApp {
             return PathBuf::from(path);
         }
         if let Some(path) = env::var_os("XDG_DATA_HOME") {
-            return PathBuf::from(path).join("electric_pulse").join("music").join("user");
+            return PathBuf::from(path)
+                .join("electric_pulse")
+                .join("music")
+                .join("user");
         }
         if let Some(home) = env::var_os("HOME") {
             return PathBuf::from(home)
@@ -459,13 +466,13 @@ impl ElectricPulseGuiApp {
                 let demo_name = self.selected_demo().key.to_uppercase();
                 self.set_status(
                     StatusTone::Active,
-                    format!("PLAYING • {demo_name} @ {}", Self::format_position(target, self.current_render_duration_secs())),
+                    format!(
+                        "PLAYING • {demo_name} @ {}",
+                        Self::format_position(target, self.current_render_duration_secs())
+                    ),
                 );
             }
-            Err(error) => self.set_status(
-                StatusTone::Warning,
-                format!("SEEK ERROR • {error}"),
-            ),
+            Err(error) => self.set_status(StatusTone::Warning, format!("SEEK ERROR • {error}")),
         }
     }
 
@@ -481,7 +488,11 @@ impl ElectricPulseGuiApp {
     fn format_position(position: f32, duration_secs: Option<f32>) -> String {
         let total = duration_secs.unwrap_or(0.0);
         let at = position.clamp(0.0, 1.0) * total;
-        format!("{} / {}", Self::format_seconds(at), Self::format_seconds(total))
+        format!(
+            "{} / {}",
+            Self::format_seconds(at),
+            Self::format_seconds(total)
+        )
     }
 
     fn format_seconds(secs: f32) -> String {
@@ -950,7 +961,18 @@ impl ElectricPulseGuiApp {
             return;
         }
 
-        match editor::load_editable_song_from_path(&path) {
+        let is_midi = path
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("mid") || ext.eq_ignore_ascii_case("midi"))
+            .unwrap_or(false);
+        let load_result = if is_midi {
+            editor::import_editable_song_from_midi_path(&path)
+        } else {
+            editor::load_editable_song_from_path(&path)
+        };
+
+        match load_result {
             Ok(song) => {
                 self.stop_playback(false);
                 self.editable_song = Some(song);
@@ -959,15 +981,29 @@ impl ElectricPulseGuiApp {
                 self.editor_state.selected_pattern = Some(0);
                 self.editor_state.selected_step = Some(0);
                 self.set_active_track_index(0);
-                self.editor_state.dirty = false;
-                self.editor_state.last_saved_path = Some(path.clone());
+                self.editor_state.dirty = is_midi;
+                self.editor_state.last_saved_path = if is_midi { None } else { Some(path.clone()) };
                 self.editor_state.last_error = None;
-                self.editor_open_path = path.to_string_lossy().to_string();
-                self.remember_recent_song(path.clone(), "OPENED EDITABLE SONG".to_string());
+                if is_midi {
+                    let suggested = self
+                        .editable_song
+                        .as_ref()
+                        .map(|song| self.suggest_user_song_path(&song.title))
+                        .unwrap_or_else(|| self.suggest_user_song_path("Imported MIDI"));
+                    self.editor_open_path = suggested.to_string_lossy().to_string();
+                    self.remember_recent_song(path.clone(), "IMPORTED MIDI SONG".to_string());
+                } else {
+                    self.editor_open_path = path.to_string_lossy().to_string();
+                    self.remember_recent_song(path.clone(), "OPENED EDITABLE SONG".to_string());
+                }
                 self.sync_arrangement_selection_with_pattern(false);
                 self.set_status(
                     StatusTone::Active,
-                    format!("EDIT MODE • OPENED {}", path.display()),
+                    if is_midi {
+                        format!("EDIT MODE • IMPORTED MIDI {}", path.display())
+                    } else {
+                        format!("EDIT MODE • OPENED {}", path.display())
+                    },
                 );
             }
             Err(error) => {
@@ -1133,10 +1169,7 @@ impl ElectricPulseGuiApp {
             let abc = match editor::serialize_editable_song(song) {
                 Ok(abc) => abc,
                 Err(error) => {
-                    self.set_status(
-                        StatusTone::Warning,
-                        format!("MIDI EXPORT FAILED • {error}"),
-                    );
+                    self.set_status(StatusTone::Warning, format!("MIDI EXPORT FAILED • {error}"));
                     return;
                 }
             };
@@ -1191,6 +1224,29 @@ impl ElectricPulseGuiApp {
             ),
             Err(error) => {
                 self.set_status(StatusTone::Warning, format!("MIDI EXPORT FAILED • {error}"))
+            }
+        }
+    }
+
+    fn run_llm_action(&mut self) {
+        let prompt = self.llm_prompt_buffer.trim();
+        if prompt.is_empty() {
+            self.llm_last_response.clear();
+            self.set_status(StatusTone::Warning, "LLM ACTION FAILED • ENTER A PROMPT");
+            return;
+        }
+
+        match ffi::llama_complete_prompt(prompt) {
+            Ok(response) => {
+                self.llm_last_response = response.clone();
+                self.set_status(
+                    StatusTone::Active,
+                    format!("LLM ACTION COMPLETE • {} CHARS", response.chars().count()),
+                );
+            }
+            Err(error) => {
+                self.llm_last_response.clear();
+                self.set_status(StatusTone::Warning, format!("LLM ACTION FAILED • {error}"));
             }
         }
     }
@@ -1747,7 +1803,9 @@ impl ElectricPulseGuiApp {
     }
 
     fn poll_playback(&mut self) {
-        let Some(result) = self.playback.poll() else { return };
+        let Some(result) = self.playback.poll() else {
+            return;
+        };
         // When jam mode is active and playback finished cleanly, chain the
         // next section instead of parking the playhead.
         if matches!(result, Ok(())) && self.jam.is_some() {
@@ -1764,15 +1822,16 @@ impl ElectricPulseGuiApp {
         }
         match result {
             Ok(()) => self.set_status(StatusTone::Normal, "PLAYBACK FINISHED."),
-            Err(error) => {
-                self.set_status(StatusTone::Warning, format!("PLAYBACK ERROR • {error}"))
-            }
+            Err(error) => self.set_status(StatusTone::Warning, format!("PLAYBACK ERROR • {error}")),
         }
     }
 
     fn start_jam_for_selected(&mut self) {
         if self.jam.is_some() {
-            self.set_status(StatusTone::Normal, "JAM ALREADY RUNNING • PRESS ESC TO STOP");
+            self.set_status(
+                StatusTone::Normal,
+                "JAM ALREADY RUNNING • PRESS ESC TO STOP",
+            );
             return;
         }
         let demo = self.selected_demo();
@@ -1850,9 +1909,7 @@ impl ElectricPulseGuiApp {
                 });
                 self.set_status(
                     StatusTone::Active,
-                    format!(
-                        "JAM • {display_key} • section {iter} • seed {seed} • ESC TO STOP"
-                    ),
+                    format!("JAM • {display_key} • section {iter} • seed {seed} • ESC TO STOP"),
                 );
             }
             Err(error) => {
@@ -2008,6 +2065,9 @@ impl ElectricPulseGuiApp {
                         self.start_jam_for_selected();
                     }
                 }
+            }
+            if input.modifiers.command && input.key_pressed(egui::Key::L) {
+                self.run_llm_action();
             }
 
             if input.key_pressed(egui::Key::Tab) {
@@ -3868,7 +3928,7 @@ impl ElectricPulseGuiApp {
                     .resizable(false)
                     .show(ctx, |ui| {
                         ui.label(
-                            RichText::new("OPEN AN EDITABLE .ABC SONG")
+                            RichText::new("OPEN .ABC SONG OR IMPORT .MID/.MIDI")
                                 .monospace()
                                 .size(12.0),
                         );
@@ -3884,11 +3944,13 @@ impl ElectricPulseGuiApp {
                         ui.add_space(4.0);
                         let response = ui.add(
                             egui::TextEdit::singleline(&mut self.editor_open_path)
-                                .hint_text("ABSOLUTE PATH TO SONG .ABC")
+                                .hint_text("ABSOLUTE PATH TO .ABC OR .MID/.MIDI")
                                 .font(TextStyle::Monospace)
                                 .desired_width(540.0),
                         );
-                        if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                        if response.lost_focus()
+                            && ui.input(|input| input.key_pressed(egui::Key::Enter))
+                        {
                             let path = PathBuf::from(self.editor_open_path.trim());
                             self.request_action(DeferredAction::OpenSongPath(path));
                             close_dialog = true;
@@ -3896,7 +3958,12 @@ impl ElectricPulseGuiApp {
                         if !self.recent_songs.is_empty() {
                             ui.add_space(4.0);
                             ui.separator();
-                            ui.label(RichText::new("RECENT").monospace().size(11.0).color(TEXT_DIM));
+                            ui.label(
+                                RichText::new("RECENT")
+                                    .monospace()
+                                    .size(11.0)
+                                    .color(TEXT_DIM),
+                            );
                             for entry in self.recent_songs.iter().take(5) {
                                 if ui
                                     .button(
@@ -3910,18 +3977,24 @@ impl ElectricPulseGuiApp {
                                     )
                                     .clicked()
                                 {
-                                    self.editor_open_path = entry.path.to_string_lossy().to_string();
+                                    self.editor_open_path =
+                                        entry.path.to_string_lossy().to_string();
                                 }
                             }
                         }
                         ui.add_space(6.0);
                         ui.horizontal(|ui| {
-                            if ui.button(RichText::new("OPEN").monospace().size(11.0)).clicked() {
+                            if ui
+                                .button(RichText::new("OPEN").monospace().size(11.0))
+                                .clicked()
+                            {
                                 let path = PathBuf::from(self.editor_open_path.trim());
                                 self.request_action(DeferredAction::OpenSongPath(path));
                                 close_dialog = true;
                             }
-                            if ui.button(RichText::new("CANCEL (ESC)").monospace().size(11.0)).clicked()
+                            if ui
+                                .button(RichText::new("CANCEL (ESC)").monospace().size(11.0))
+                                .clicked()
                             {
                                 close_dialog = true;
                             }
@@ -3967,12 +4040,16 @@ impl ElectricPulseGuiApp {
                         }
                         ui.add_space(6.0);
                         ui.horizontal(|ui| {
-                            if ui.button(RichText::new("SAVE").monospace().size(11.0)).clicked()
+                            if ui
+                                .button(RichText::new("SAVE").monospace().size(11.0))
+                                .clicked()
                                 && self.save_editable_song(true)
                             {
                                 close_dialog = true;
                             }
-                            if ui.button(RichText::new("CANCEL (ESC)").monospace().size(11.0)).clicked()
+                            if ui
+                                .button(RichText::new("CANCEL (ESC)").monospace().size(11.0))
+                                .clicked()
                             {
                                 close_dialog = true;
                             }
@@ -4003,7 +4080,10 @@ impl ElectricPulseGuiApp {
                         );
                         ui.add_space(6.0);
                         ui.horizontal(|ui| {
-                            if ui.button(RichText::new("SAVE (S)").monospace().size(11.0)).clicked() {
+                            if ui
+                                .button(RichText::new("SAVE (S)").monospace().size(11.0))
+                                .clicked()
+                            {
                                 self.resolve_unsaved_action(true, false);
                             }
                             if ui
@@ -4036,12 +4116,12 @@ impl ElectricPulseGuiApp {
                 .map(|song| song.title.to_uppercase())
                 .unwrap_or_else(|| "UNTITLED".to_string())
         };
-        let dirty_prefix = if self.editor_state.mode != EditorMode::Browser && self.effective_song_dirty()
-        {
-            "* "
-        } else {
-            ""
-        };
+        let dirty_prefix =
+            if self.editor_state.mode != EditorMode::Browser && self.effective_song_dirty() {
+                "* "
+            } else {
+                ""
+            };
         let title = format!(
             "{dirty_prefix}ELECTRIC PULSE SOUND MACHINE • {} • {}",
             self.editor_state.mode.label(),
@@ -4201,7 +4281,10 @@ impl ElectricPulseGuiApp {
                 let hover_progress = pointer_progress(hover);
                 let x = egui::lerp(rect.left()..=rect.right(), hover_progress);
                 painter.line_segment(
-                    [egui::pos2(x, rect.top() + 2.0), egui::pos2(x, rect.bottom() - 2.0)],
+                    [
+                        egui::pos2(x, rect.top() + 2.0),
+                        egui::pos2(x, rect.bottom() - 2.0),
+                    ],
                     Stroke::new(1.0, TEXT_DIM),
                 );
                 let label = Self::format_position(hover_progress, duration);
@@ -4666,155 +4749,178 @@ impl eframe::App for ElectricPulseGuiApp {
         }
 
         egui::TopBottomPanel::top("runtime_header").show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.heading("ELECTRIC PULSE SOUND MACHINE");
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            RichText::new(format!("FOCUS • {}", self.focus_label()))
-                                .monospace()
-                                .color(ACCENT),
-                        );
-                    });
-                });
-                ui.separator();
-                ui.horizontal_wrapped(|ui| {
-                    let header_song = if self.editor_state.mode == EditorMode::Browser {
-                        self.selected_demo().key.to_uppercase()
-                    } else {
-                        self.editable_song
-                            .as_ref()
-                            .map(|song| song.title.to_uppercase())
-                            .unwrap_or_else(|| self.selected_demo().key.to_uppercase())
-                    };
+            ui.horizontal(|ui| {
+                ui.heading("ELECTRIC PULSE SOUND MACHINE");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
-                        RichText::new(format!("SONG • {header_song}"))
+                        RichText::new(format!("FOCUS • {}", self.focus_label()))
+                            .monospace()
+                            .color(ACCENT),
+                    );
+                });
+            });
+            ui.separator();
+            ui.horizontal_wrapped(|ui| {
+                let header_song = if self.editor_state.mode == EditorMode::Browser {
+                    self.selected_demo().key.to_uppercase()
+                } else {
+                    self.editable_song
+                        .as_ref()
+                        .map(|song| song.title.to_uppercase())
+                        .unwrap_or_else(|| self.selected_demo().key.to_uppercase())
+                };
+                ui.label(
+                    RichText::new(format!("SONG • {header_song}"))
+                        .monospace()
+                        .size(12.0)
+                        .color(TEXT_DIM),
+                );
+                let header_track = if self.editor_state.mode == EditorMode::Browser {
+                    self.selected_browser_track()
+                        .map(|track| track.name.to_uppercase())
+                } else {
+                    self.selected_editable_track()
+                        .map(|track| track.name.to_uppercase())
+                };
+                if let Some(track_name) = header_track {
+                    ui.separator();
+                    ui.label(
+                        RichText::new(format!("TRACK • {track_name}"))
                             .monospace()
                             .size(12.0)
                             .color(TEXT_DIM),
                     );
-                    let header_track = if self.editor_state.mode == EditorMode::Browser {
-                        self.selected_browser_track()
-                            .map(|track| track.name.to_uppercase())
+                }
+                ui.separator();
+                ui.label(
+                    RichText::new(if self.editor_state.mode == EditorMode::Browser {
+                        "READ-ONLY"
                     } else {
-                        self.selected_editable_track()
-                            .map(|track| track.name.to_uppercase())
-                    };
-                    if let Some(track_name) = header_track {
-                        ui.separator();
-                        ui.label(
-                            RichText::new(format!("TRACK • {track_name}"))
-                                .monospace()
-                                .size(12.0)
-                                .color(TEXT_DIM),
-                        );
-                    }
-                    ui.separator();
-                    ui.label(
-                        RichText::new(if self.editor_state.mode == EditorMode::Browser {
-                            "READ-ONLY"
-                        } else {
-                            "EDITABLE"
-                        })
-                        .monospace()
-                        .size(12.0)
-                        .color(
-                            if self.editor_state.mode == EditorMode::Browser {
-                                BORDER
-                            } else {
-                                ACCENT
-                            },
-                        ),
-                    );
-                });
-                ui.add_space(4.0);
-                ui.horizontal_wrapped(|ui| {
-                    if ui
-                        .button(RichText::new("NEW SONG").monospace().size(12.0))
-                        .clicked()
-                    {
-                        self.request_action(DeferredAction::NewSong);
-                    }
-                    if ui
-                        .button(
-                            RichText::new("DUPLICATE DEMO AS EDITABLE")
-                                .monospace()
-                                .size(12.0),
-                        )
-                        .clicked()
-                    {
-                        self.request_action(DeferredAction::DuplicateFromBrowserDemo);
-                    }
-                    if ui
-                        .button(RichText::new("OPEN SONG").monospace().size(12.0))
-                        .clicked()
-                    {
-                        self.request_action(DeferredAction::OpenSongDialog);
-                    }
-                    if self.editor_state.mode != EditorMode::Browser
-                        && ui
-                            .button(RichText::new("SAVE").monospace().size(12.0))
-                            .clicked()
-                    {
-                        let _ = self.save_editable_song(false);
-                    }
-                    if self.editor_state.mode != EditorMode::Browser
-                        && ui
-                            .button(RichText::new("SAVE AS").monospace().size(12.0))
-                            .clicked()
-                    {
-                        self.active_dialog = Some(ActiveDialog::SaveAsPath);
-                    }
-                    if self.editor_state.mode != EditorMode::Browser
-                        && ui
-                            .button(RichText::new("CLOSE SONG").monospace().size(12.0))
-                            .clicked()
-                    {
-                        self.request_action(DeferredAction::CloseSong);
-                    }
-                    if self.editor_state.mode != EditorMode::Browser
-                        && ui
-                            .button(RichText::new("BROWSER MODE").monospace().size(12.0))
-                            .clicked()
-                    {
-                        self.request_action(DeferredAction::SwitchMode(EditorMode::Browser));
-                    }
-                    if self.editor_state.mode == EditorMode::Preview
-                        && ui
-                            .button(RichText::new("EDIT MODE").monospace().size(12.0))
-                            .clicked()
-                    {
-                        self.set_mode(EditorMode::Edit);
-                    }
-                    if self.editor_state.mode == EditorMode::Edit
-                        && ui
-                            .button(RichText::new("PREVIEW").monospace().size(12.0))
-                            .clicked()
-                    {
-                        self.render_editable_preview();
-                    }
-                    // Export MIDI (ADR-0003, off the render path). Available
-                    // whenever there's a song to export: a selected demo in
-                    // Browser mode, or the live editable buffer otherwise.
-                    let can_export_midi = self.editor_state.mode == EditorMode::Browser
-                        || self.editable_song.is_some();
-                    if can_export_midi
-                        && ui
-                            .button(RichText::new("EXPORT MIDI").monospace().size(12.0))
-                            .on_hover_text("Ctrl+E • write a Standard MIDI File to bin/midi/")
-                            .clicked()
-                    {
-                        self.export_current_to_midi();
-                    }
-                    if !self.editor_open_path.trim().is_empty() {
-                        ui.label(
-                            RichText::new(format!("PATH • {}", self.editor_open_path))
-                                .monospace()
-                                .size(11.0)
-                                .color(TEXT_DIM),
-                        );
-                    }
-                });
+                        "EDITABLE"
+                    })
+                    .monospace()
+                    .size(12.0)
+                    .color(if self.editor_state.mode == EditorMode::Browser {
+                        BORDER
+                    } else {
+                        ACCENT
+                    }),
+                );
             });
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .button(RichText::new("NEW SONG").monospace().size(12.0))
+                    .clicked()
+                {
+                    self.request_action(DeferredAction::NewSong);
+                }
+                if ui
+                    .button(
+                        RichText::new("DUPLICATE DEMO AS EDITABLE")
+                            .monospace()
+                            .size(12.0),
+                    )
+                    .clicked()
+                {
+                    self.request_action(DeferredAction::DuplicateFromBrowserDemo);
+                }
+                if ui
+                    .button(RichText::new("OPEN SONG").monospace().size(12.0))
+                    .clicked()
+                {
+                    self.request_action(DeferredAction::OpenSongDialog);
+                }
+                if self.editor_state.mode != EditorMode::Browser
+                    && ui
+                        .button(RichText::new("SAVE").monospace().size(12.0))
+                        .clicked()
+                {
+                    let _ = self.save_editable_song(false);
+                }
+                if self.editor_state.mode != EditorMode::Browser
+                    && ui
+                        .button(RichText::new("SAVE AS").monospace().size(12.0))
+                        .clicked()
+                {
+                    self.active_dialog = Some(ActiveDialog::SaveAsPath);
+                }
+                if self.editor_state.mode != EditorMode::Browser
+                    && ui
+                        .button(RichText::new("CLOSE SONG").monospace().size(12.0))
+                        .clicked()
+                {
+                    self.request_action(DeferredAction::CloseSong);
+                }
+                if self.editor_state.mode != EditorMode::Browser
+                    && ui
+                        .button(RichText::new("BROWSER MODE").monospace().size(12.0))
+                        .clicked()
+                {
+                    self.request_action(DeferredAction::SwitchMode(EditorMode::Browser));
+                }
+                if self.editor_state.mode == EditorMode::Preview
+                    && ui
+                        .button(RichText::new("EDIT MODE").monospace().size(12.0))
+                        .clicked()
+                {
+                    self.set_mode(EditorMode::Edit);
+                }
+                if self.editor_state.mode == EditorMode::Edit
+                    && ui
+                        .button(RichText::new("PREVIEW").monospace().size(12.0))
+                        .clicked()
+                {
+                    self.render_editable_preview();
+                }
+                // Export MIDI (ADR-0003, off the render path). Available
+                // whenever there's a song to export: a selected demo in
+                // Browser mode, or the live editable buffer otherwise.
+                let can_export_midi =
+                    self.editor_state.mode == EditorMode::Browser || self.editable_song.is_some();
+                if can_export_midi
+                    && ui
+                        .button(RichText::new("EXPORT MIDI").monospace().size(12.0))
+                        .on_hover_text("Ctrl+E • write a Standard MIDI File to bin/midi/")
+                        .clicked()
+                {
+                    self.export_current_to_midi();
+                }
+                let prompt_input = ui.add_sized(
+                    [320.0, 20.0],
+                    egui::TextEdit::singleline(&mut self.llm_prompt_buffer).hint_text("LLM prompt"),
+                );
+                if prompt_input.lost_focus()
+                    && ui.input(|input| input.key_pressed(egui::Key::Enter))
+                {
+                    self.run_llm_action();
+                }
+                if ui
+                    .button(RichText::new("LLM ACTION").monospace().size(12.0))
+                    .on_hover_text("Ctrl+L • call the optional llama.cpp FFI bridge")
+                    .clicked()
+                {
+                    self.run_llm_action();
+                }
+                if !self.editor_open_path.trim().is_empty() {
+                    ui.label(
+                        RichText::new(format!("PATH • {}", self.editor_open_path))
+                            .monospace()
+                            .size(11.0)
+                            .color(TEXT_DIM),
+                    );
+                }
+            });
+            if !self.llm_last_response.trim().is_empty() {
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(format!("LLM • {}", self.llm_last_response))
+                        .monospace()
+                        .size(11.0)
+                        .color(ACCENT),
+                );
+            }
+        });
 
         egui::TopBottomPanel::bottom("runtime_footer")
             .resizable(false)
@@ -4823,8 +4929,7 @@ impl eframe::App for ElectricPulseGuiApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             let available = ui.available_size();
             let is_tall_aspect = available.y > available.x * 1.1;
-            let use_compact_layout =
-                is_tall_aspect || available.x < COMPACT_LAYOUT_BREAKPOINT;
+            let use_compact_layout = is_tall_aspect || available.x < COMPACT_LAYOUT_BREAKPOINT;
 
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
@@ -5308,6 +5413,35 @@ mod tests {
         }
     }
 
+    struct TempMidiFile(PathBuf);
+
+    impl TempMidiFile {
+        fn new(label: &str) -> Self {
+            Self(std::env::temp_dir().join(format!(
+                "electric-pulse-gui-{label}-{}.mid",
+                std::process::id()
+            )))
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempMidiFile {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.0);
+        }
+    }
+
+    fn simple_midi_bytes() -> Vec<u8> {
+        vec![
+            b'M', b'T', b'h', b'd', 0, 0, 0, 6, 0, 0, 0, 1, 1, 224, b'M', b'T', b'r', b'k', 0, 0,
+            0, 20, 0, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20, 0, 0x90, 60, 112, 0x83, 0x60, 0x80, 60,
+            0, 0, 0xFF, 0x2F, 0,
+        ]
+    }
+
     #[test]
     fn new_song_initializes_editable_lifecycle_state() {
         let mut app = ElectricPulseGuiApp::default();
@@ -5338,6 +5472,34 @@ mod tests {
         app.create_new_song();
         if let Some(song) = app.editable_song.as_mut() {
             song.title = "Roundtrip".to_string();
+        }
+
+        #[test]
+        fn open_midi_path_imports_song_and_marks_dirty() {
+            let mut app = ElectricPulseGuiApp::default();
+            app.user_song_root = std::env::temp_dir().join("electric-pulse-gui-midi-import");
+            let midi = TempMidiFile::new("open-midi");
+            fs::write(midi.path(), simple_midi_bytes()).expect("midi fixture should write");
+
+            app.open_editable_song_from_path(midi.path().to_path_buf());
+
+            assert_eq!(app.editor_state.mode, EditorMode::Edit);
+            assert!(
+                app.effective_song_dirty(),
+                "import should require save-as to abc"
+            );
+            assert!(
+                app.editor_open_path.ends_with(".abc"),
+                "import should suggest an .abc output path"
+            );
+            assert_eq!(
+                app.editable_song
+                    .as_ref()
+                    .and_then(|song| song.tracks.first())
+                    .and_then(|track| track.steps.first())
+                    .map(|step| step.active),
+                Some(true)
+            );
         }
         let path = TempSongFile::new("open-roundtrip");
         app.editor_open_path = path.path().to_string_lossy().to_string();
@@ -5391,11 +5553,9 @@ mod tests {
         fs::write(path.path(), content).expect("fixture should write");
         app.open_editable_song_from_path(path.path().to_path_buf());
         assert!(
-            app.recent_songs
-                .iter()
-                .any(|entry| {
-                    entry.path.as_path() == path.path() && entry.source_label.contains("OPENED")
-                }),
+            app.recent_songs.iter().any(|entry| {
+                entry.path.as_path() == path.path() && entry.source_label.contains("OPENED")
+            }),
             "opened song should be tracked in recents"
         );
     }
@@ -5413,6 +5573,30 @@ mod tests {
     }
 
     #[test]
+    fn llm_action_requires_prompt() {
+        let mut app = ElectricPulseGuiApp::default();
+        app.run_llm_action();
+        assert!(matches!(app.status.tone, StatusTone::Warning));
+        assert_eq!(app.status.text, "LLM ACTION FAILED • ENTER A PROMPT");
+        assert!(app.llm_last_response.is_empty());
+    }
+
+    #[cfg(not(feature = "llama_cpp_ffi"))]
+    #[test]
+    fn llm_action_reports_disabled_bridge_without_feature() {
+        let mut app = ElectricPulseGuiApp::default();
+        app.llm_prompt_buffer = "write a bassline".to_string();
+        app.run_llm_action();
+        assert!(matches!(app.status.tone, StatusTone::Warning));
+        assert!(
+            app.status.text.contains("llama.cpp FFI bridge is disabled"),
+            "expected disabled-bridge error, got: {}",
+            app.status.text
+        );
+        assert!(app.llm_last_response.is_empty());
+    }
+
+    #[test]
     fn sanitize_midi_stem_is_filesystem_safe() {
         assert_eq!(sanitize_midi_stem("Glass Anthem"), "glass_anthem");
         assert_eq!(sanitize_midi_stem("  Dark / Moroder!! "), "dark_moroder");
@@ -5427,10 +5611,7 @@ mod tests {
         // demo. Parallel-safe temp path (pid + thread-id), per the editor
         // preview convention.
         let root = crate::audio_engine::repository_root();
-        let abc = root
-            .join("data")
-            .join("music")
-            .join("glass_anthem.abc");
+        let abc = root.join("data").join("music").join("glass_anthem.abc");
         assert!(abc.is_file(), "showcase demo glass_anthem.abc should exist");
 
         let out = std::env::temp_dir().join(format!(

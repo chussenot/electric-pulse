@@ -97,6 +97,7 @@ New top-bar actions:
 - **Save As**
 - **Close Song**
 - **Browser Mode**
+- **LLM Action** (prompt box + action trigger via optional `llama_cpp_ffi` bridge)
 
 Focus areas now include:
 

@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+#[cfg(feature = "llama_cpp_ffi")]
+use std::ffi::CStr;
 use std::ffi::CString;
 use std::os::raw::{c_char, c_double, c_int};
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
 use std::ptr;
 use std::slice;
@@ -224,6 +226,17 @@ unsafe extern "C" {
     fn audio_jam_session_close(session: *mut AudioJamSessionRaw);
 }
 
+// Optional llama.cpp bridge hook. The symbol is intentionally feature-gated so
+// the default deterministic build has zero neural/LLM dependency (ADR-0003).
+#[cfg(feature = "llama_cpp_ffi")]
+unsafe extern "C" {
+    fn electric_pulse_llama_complete(
+        prompt: *const c_char,
+        out_text: *mut c_char,
+        out_text_len: c_int,
+    ) -> c_int;
+}
+
 #[repr(C)]
 struct AudioJamSessionRaw {
     _private: [u8; 0],
@@ -317,6 +330,46 @@ pub fn render_abc_file(path: &Path) -> Result<Vec<u8>, String> {
     }
 
     Ok(samples)
+}
+
+/// Optional llama.cpp text completion bridge exposed through FFI.
+///
+/// This is intentionally outside the render path and feature-gated so default
+/// builds remain deterministic and dependency-free. When the
+/// `llama_cpp_ffi` feature is enabled, the runtime must provide the C symbol
+/// `electric_pulse_llama_complete` (typically implemented in a llama.cpp bridge).
+pub fn llama_complete_prompt(prompt: &str) -> Result<String, String> {
+    let trimmed = prompt.trim();
+    if trimmed.is_empty() {
+        return Err("llm prompt cannot be empty".to_string());
+    }
+
+    #[cfg(feature = "llama_cpp_ffi")]
+    {
+        let c_prompt =
+            CString::new(trimmed).map_err(|_| "llm prompt contains NUL byte".to_string())?;
+        let mut out = vec![0 as c_char; 4096];
+        let rc = catch_unwind(AssertUnwindSafe(|| unsafe {
+            electric_pulse_llama_complete(c_prompt.as_ptr(), out.as_mut_ptr(), out.len() as c_int)
+        }))
+        .map_err(|_| "llm completion panicked".to_string())?;
+        if rc != 0 {
+            return Err(format!("llm completion failed with code {rc}"));
+        }
+        let text = unsafe { CStr::from_ptr(out.as_ptr()) }
+            .to_string_lossy()
+            .trim()
+            .to_string();
+        if text.is_empty() {
+            return Err("llm completion returned empty output".to_string());
+        }
+        return Ok(text);
+    }
+
+    #[cfg(not(feature = "llama_cpp_ffi"))]
+    {
+        Err("llama.cpp FFI bridge is disabled; rebuild with --features llama_cpp_ffi".to_string())
+    }
 }
 
 /// Export an `.abc` file to a Standard MIDI File via the read-only C bridge
