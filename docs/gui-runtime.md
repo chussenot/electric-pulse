@@ -1,14 +1,14 @@
 # Electric Pulse GUI Runtime
 
-Electric Pulse's Rust GUI is an editable shell over the existing C renderer. The C engine remains the source of truth for parsing, sequencing, FX, PCM generation, and deterministic render stats.
+Electric Pulse's Rust GUI is an editable shell over the C renderer, which lives in Sonomorph (`vendor/sonomorph`, ADR-0004). The engine remains the source of truth for parsing, sequencing, FX, PCM generation, and deterministic render stats.
 
 ## Runtime architecture
 
 ```mermaid
 flowchart LR
     GUI[egui / eframe screen] --> WRAPPER[src/audio_engine.rs]
-    WRAPPER --> FFI[src/ffi.rs]
-    FFI --> ENGINE[src/audio_engine.c]
+    WRAPPER --> CHIP8[src/chip8.rs]
+    CHIP8 --> ENGINE[sonomorph::chip8]
     ENGINE --> ABC[abc loader]
     ABC --> MUSIC[AbcMusic metadata]
     ENGINE --> SONG[SeqSong build]
@@ -18,7 +18,7 @@ flowchart LR
 
 ## Runtime responsibilities
 
-- `src/ffi.rs` owns the unsafe boundary and metadata extraction.
+- `src/chip8.rs` calls Sonomorph (which owns the unsafe boundary) and turns its songs into GUI metadata.
 - `src/audio_engine.rs` exposes safe overview structs for demos, tracks, buses, and render output.
 - `src/playback.rs` streams rendered PCM to the host output device with `cpal` and reports playback state + progress.
 - `src/app.rs` owns layout, focus flow, mode transitions, status messaging, and editor synchronization.

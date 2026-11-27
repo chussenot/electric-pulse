@@ -38,7 +38,7 @@ Explicitly out of scope:
 
 ## Data flow
 
-`EditableSong -> serialize_editable_song() -> temporary/target .abc -> ffi::render_abc_file() -> PCM`
+`EditableSong -> serialize_editable_song() -> temporary/target .abc -> chip8::render_abc_file() -> PCM`
 
 This keeps one audio engine path and preserves deterministic browser behavior.
 

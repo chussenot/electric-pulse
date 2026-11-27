@@ -2,7 +2,7 @@
 
 ## Instrument model
 
-The sequencer/mixer instrument model is `SeqInstrument` (`src/audio_seq.h`) with:
+The sequencer/mixer instrument model is `SeqInstrument` (`vendor/sonomorph/engine/chip8/audio_seq.h`) with:
 
 - waveform / optional noise mode
 - amplitude
@@ -14,7 +14,7 @@ The sequencer/mixer instrument model is `SeqInstrument` (`src/audio_seq.h`) with
 - glide/portamento
 - FX send + accent gain
 
-Built-in presets (`src/audio_song_builtin.c`):
+Built-in presets (`audio_song_builtin.c`):
 
 - `electric_pulse_bass_pulse`
 - `electric_pulse_dark_arp`
@@ -27,7 +27,7 @@ Built-in presets (`src/audio_song_builtin.c`):
 
 ## ADSR model
 
-`DspEnvelope` (`src/audio_dsp.h`) is portable and deterministic:
+`DspEnvelope` (`audio_dsp.h`) is portable and deterministic:
 
 - `attack_ms`
 - `decay_ms`
