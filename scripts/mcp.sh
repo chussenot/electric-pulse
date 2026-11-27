@@ -6,7 +6,8 @@ cd "$ROOT"
 . scripts/lib.sh
 
 MCP_BIN="$BIN_DIR/electric-pulse-mcp"
-MCP_CFLAGS="-Wall -Wextra -O2 -std=c99 -D_DEFAULT_SOURCE -D_XOPEN_SOURCE=600 -Imcp/vendor/yyjson -Isrc"
+require_engine
+MCP_CFLAGS="-Wall -Wextra -O2 -std=c99 -D_DEFAULT_SOURCE -D_XOPEN_SOURCE=600 -Imcp/vendor/yyjson -I$ENGINE_DIR"
 # yyjson is third-party; suppress its warnings without diluting ours.
 MCP_VENDOR_CFLAGS="-O2 -std=c99 -w -Imcp/vendor/yyjson"
 
@@ -16,4 +17,4 @@ $CC $MCP_VENDOR_CFLAGS -c mcp/vendor/yyjson/yyjson.c -o build/mcp/yyjson.o
 # midi_export.c is the read-only SeqSong -> MIDI bridge backing the export_midi
 # tool; it lives off the render path (ADR-0003).
 # shellcheck disable=SC2086
-$CC $MCP_CFLAGS -o "$MCP_BIN" tools/electric_pulse_mcp.c $ENGINE_SRC src/midi_export.c build/mcp/yyjson.o -lm
+$CC $MCP_CFLAGS -o "$MCP_BIN" tools/electric_pulse_mcp.c $ENGINE_SRC "$ENGINE_DIR/midi_export.c" build/mcp/yyjson.o -lm

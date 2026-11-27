@@ -1,7 +1,7 @@
 #include <stdio.h>
 
-#include "../src/audio_engine.h"
-#include "../src/electric_pulse.h"
+#include "audio_engine.h"
+#include "electric_pulse.h"
 
 static int render_file(const char *path)
 {

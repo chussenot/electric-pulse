@@ -19,7 +19,7 @@ if [ -z "$NAME" ]; then
 fi
 
 # shellcheck disable=SC2086
-cc_build "$BIN_DIR/export-midi" tests/export_midi.c src/midi_export.c $ENGINE_SRC
+cc_build "$BIN_DIR/export-midi" tests/export_midi.c "$ENGINE_DIR/midi_export.c" $ENGINE_SRC
 
 if [ -n "$OUT" ]; then
 	"$BIN_DIR/export-midi" "$NAME" "$OUT"

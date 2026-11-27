@@ -12,11 +12,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4.2.2
+        with:
+          # The engine: Sonomorph, pinned at vendor/sonomorph (ADR-0004).
+          submodules: true
       - name: Native clean
         run: make clean
-      - name: Audio DSP regression
-        run: make test-audio
-      - name: ABC audio regression
+      - name: Engine tests (Sonomorph, at the pinned commit)
+        run: make test-engine
+      - name: ABC + showcase regression
         run: make test-abc
       - name: Full test suite
         run: make test
@@ -31,6 +34,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4.2.2
+        with:
+          submodules: true
       - name: Install GUI runtime dependencies
         run: |
           sudo apt-get update

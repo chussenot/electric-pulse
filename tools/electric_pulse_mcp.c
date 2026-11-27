@@ -133,7 +133,7 @@ static void send_tool_text_error(yyjson_val *id, const char *msg)
 /* ============================================================
  *   Music theory helpers (pitch resolution, chord spelling)
  *
- *   Mirrors src/abc.c parse_note pitch logic without pulling
+ *   Mirrors the engine's abc.c parse_note pitch logic without pulling
  *   the static parser. ABC convention here:
  *     uppercase C..B = octave 4 (C4 = MIDI 60, A4 = MIDI 69)
  *     lowercase c..b = octave 5 (c5 = MIDI 72)

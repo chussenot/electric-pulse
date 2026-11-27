@@ -1,14 +1,21 @@
 /*
- * Verify ABC parser for both menu tracks.
- * Build (via Makefile target "test-abc"):
- *   $(CC) $(CFLAGS) -o bin/test-abc tests/test_abc.c src/abc.c src/audio_dsp.c $(LDFLAGS)
+ * Verify ABC parser for both menu tracks, and the showcase goldens.
+ * Build (via Makefile target "test-abc"), against the engine in
+ * vendor/sonomorph/engine/chip8:
+ *   $(CC) $(CFLAGS) -Ivendor/sonomorph/engine/chip8 -o bin/test-abc tests/test_abc.c <engine sources> $(LDFLAGS)
+ *
+ * The checksums and sample prefixes are the Sonomorph engine's
+ * (docs/adr/adr-0004-sonomorph-engine.md): it mixes at 16 bits and dithers
+ * once to 8, so every golden moved when Electric Pulse adopted it. Each
+ * demo kept its exact length; the golden fixture's first 32 samples moved
+ * by at most one step. A change here needs the same kind of reason.
  */
 #include <stdio.h>
 #include <math.h>
 #include <stdint.h>
 #include <string.h>
-#include "../src/audio_engine.h"
-#include "../src/electric_pulse.h"
+#include "audio_engine.h"
+#include "electric_pulse.h"
 
 static int g_failures = 0;
 
@@ -115,12 +122,12 @@ static int test_track(const char *bass, const char *arp, const char *lead,
 static void test_golden_fixture(void)
 {
     static const unsigned char expected_prefix[] = {
-        180, 180, 180, 180, 180, 180, 180, 180,
-        180, 180, 180, 180, 180, 180, 180, 180,
+        179, 180, 181, 180, 180, 180, 180, 180,
+        180, 181, 180, 180, 180, 181, 181, 180,
         180, 140, 140, 140, 140, 140, 140, 140,
-        140, 140, 140, 140, 140, 140, 140, 140
+        140, 141, 140, 139, 140, 139, 140, 140
     };
-    static const uint64_t expected_checksum = 0x0de5a3a1954d471bull;
+    static const uint64_t expected_checksum = 0x735fed977c6e3510ull;
     const char *path = "tests/fixtures/golden_small.abc";
     AbcMusic music;
     int pcm_len = 0;
@@ -172,16 +179,16 @@ static void test_showcase_demo_regression(void)
         int max_clipping;
     } DemoExpectation;
     static const DemoExpectation demos[] = {
-        { "data/music/dark_moroder.abc", 341419, 0x40af1554d4910cccull, 5000 },
-        { "data/music/perturbator_loop.abc", 298140, 0xeb0b71f268df0b62ull, 9000 },
-        { "data/music/carpenter_drive.abc", 407076, 0xaab706f01eaac6eaull, 6000 },
-        { "data/music/advanced_dsl_demo.abc", 330750, 0x7bf8a698c875695dull, 2000 },
-        { "data/music/multi_fx_demo.abc", 315940, 0x694dd56014426abfull, 2000 },
-        { "data/music/neon_nightdrive.abc", 347016, 0xb7aa1da212da5aa9ull, 2000 },
-        { "data/music/metro_chase.abc", 289972, 0x8377e2a56353b8c7ull, 16000 },
-        { "data/music/black_sunrise.abc", 378000, 0x621b25ee41ae1c61ull, 2000 },
-        { "data/music/machine_romance.abc", 352800, 0x1e20575de2133460ull, 5000 },
-        { "data/music/hypersleep_dream.abc", 441000, 0x3bfe2cd451d41c50ull, 1000 }
+        { "data/music/dark_moroder.abc", 341419, 0x5bd9a5936142510full, 5000 },
+        { "data/music/perturbator_loop.abc", 298140, 0xcc4c350018350729ull, 9000 },
+        { "data/music/carpenter_drive.abc", 407076, 0x96554427fe343716ull, 6000 },
+        { "data/music/advanced_dsl_demo.abc", 330750, 0xabecc9c94c88cad9ull, 2000 },
+        { "data/music/multi_fx_demo.abc", 315940, 0x2df6e9dad3a5ed6bull, 2000 },
+        { "data/music/neon_nightdrive.abc", 347016, 0x1255a07f26bfc65dull, 2000 },
+        { "data/music/metro_chase.abc", 289972, 0x905840bf9c5bd49dull, 16000 },
+        { "data/music/black_sunrise.abc", 378000, 0x005ceb11d2ada670ull, 2000 },
+        { "data/music/machine_romance.abc", 352800, 0xb73ca864e5329c48ull, 5000 },
+        { "data/music/hypersleep_dream.abc", 441000, 0x93c6c207d15d348aull, 1000 }
     };
 
     for (size_t i = 0; i < sizeof(demos) / sizeof(demos[0]); i++) {
@@ -346,7 +353,7 @@ static void test_seq_song_mapping(void)
 
 static void test_legacy_render_api(void)
 {
-    static const uint64_t expected_checksum = 0x0de5a3a1954d471bull;
+    static const uint64_t expected_checksum = 0x735fed977c6e3510ull;
     unsigned char *pcm;
     AudioRenderStats stats;
     int pcm_len = 0;

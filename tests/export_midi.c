@@ -14,9 +14,9 @@
 #include <string.h>
 #include <sys/stat.h>
 
-#include "../src/electric_pulse.h"
-#include "../src/audio_seq.h"
-#include "../src/midi_export.h"
+#include "electric_pulse.h"
+#include "audio_seq.h"
+#include "midi_export.h"
 
 typedef struct {
     const char *name;

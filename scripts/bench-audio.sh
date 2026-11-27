@@ -5,6 +5,6 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$ROOT"
 . scripts/lib.sh
 
-cc_build "$BIN_DIR/bench-audio" tests/bench_audio.c src/audio_dsp.c
+cc_build "$BIN_DIR/bench-audio" tests/bench_audio.c "$ENGINE_DIR/audio_dsp.c"
 echo "Build complete: $BIN_DIR/bench-audio"
 "$BIN_DIR/bench-audio"
