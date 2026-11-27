@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, SizedSample, Stream, StreamConfig};
 
-use crate::ffi::SAMPLE_RATE_ABC;
+use crate::chip8::SAMPLE_RATE_ABC;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PlaybackState {

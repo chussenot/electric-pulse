@@ -11,7 +11,7 @@ use crate::audio_engine::{
 use crate::editor::{
     self, EditableArrangementBlock, EditablePattern, EditableSong, EditorMode, EditorState,
 };
-use crate::ffi;
+use crate::chip8;
 use crate::playback::{PlaybackController, PlaybackState};
 
 const DEFAULT_STATUS_LINE: &str = "READY • SELECT A DEMO • ENTER RENDERS • SPACE PLAYS.";
@@ -175,7 +175,7 @@ pub struct JamRuntime {
     /// Receiver fed by the worker. Channel capacity is 1, so the
     /// worker is always either holding the next section ready or
     /// mid-render of it.
-    pub next_section_rx: std::sync::mpsc::Receiver<Result<ffi::JamSection, String>>,
+    pub next_section_rx: std::sync::mpsc::Receiver<Result<chip8::JamSection, String>>,
     /// Join handle for the worker. We join on stop so the C session
     /// drops cleanly without leaving an orphan thread.
     pub worker: Option<std::thread::JoinHandle<()>>,
@@ -1092,12 +1092,12 @@ impl ElectricPulseGuiApp {
             return;
         }
 
-        match ffi::render_abc_file(&tmp_path) {
-            Ok(samples) => {
+        match chip8::render_abc_file(&tmp_path) {
+            Ok((samples, stats)) => {
                 self.runtime.rendered_audio = Some(RenderState {
                     demo_key: "__editable__".to_string(),
                     samples: std::sync::Arc::<[u8]>::from(samples),
-                    stats: ffi::get_render_stats(),
+                    stats: Some(stats),
                 });
                 self.runtime.playhead_position = 0.0;
                 self.runtime.waveform_drag_preview = None;
@@ -1173,7 +1173,7 @@ impl ElectricPulseGuiApp {
         }
         let out_path = out_dir.join(format!("{stem}.mid"));
 
-        let result = ffi::export_abc_to_midi(&source_path, &out_path);
+        let result = chip8::export_abc_to_midi(&source_path, &out_path);
         if cleanup_temp {
             let _ = std::fs::remove_file(&source_path);
         }
@@ -1784,7 +1784,7 @@ impl ElectricPulseGuiApp {
             .unwrap_or(0xCAFEBABE_12345678);
         const JAM_SECTION_SECONDS: f64 = 30.0;
 
-        let session = match ffi::JamSession::open(&path, seed, JAM_SECTION_SECONDS) {
+        let session = match chip8::JamSession::open(&path, seed, JAM_SECTION_SECONDS) {
             Ok(s) => s,
             Err(error) => {
                 self.set_status(StatusTone::Warning, format!("JAM OPEN FAILED • {error}"));
@@ -1795,7 +1795,7 @@ impl ElectricPulseGuiApp {
         // Bounded channel: capacity 1 means the worker keeps exactly one
         // section ahead of playback. When the main thread consumes a
         // section here, the worker immediately starts the next one.
-        let (tx, rx) = std::sync::mpsc::sync_channel::<Result<ffi::JamSection, String>>(1);
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Result<chip8::JamSection, String>>(1);
         let worker = std::thread::spawn(move || {
             let mut session = session;
             loop {
@@ -5440,7 +5440,7 @@ mod tests {
         ));
         let _ = fs::remove_file(&out);
 
-        let stats = ffi::export_abc_to_midi(&abc, &out).expect("export should succeed");
+        let stats = chip8::export_abc_to_midi(&abc, &out).expect("export should succeed");
         assert!(stats.track_count > 0, "expected at least one MIDI track");
         assert!(stats.note_count > 0, "expected at least one MIDI note");
         assert!(stats.ticks_per_quarter > 0);

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use crate::ffi;
+use crate::chip8;
 
 use super::model::{
     EditableArrangement, EditableArrangementBlock, EditableFxBus, EditableInstrument,
@@ -12,7 +12,7 @@ use super::validation::validate_song;
 
 pub fn load_editable_song_from_path(path: &Path) -> Result<EditableSong, String> {
     let (comments, step_directives) = load_comments_and_step_directives(path);
-    let raw = ffi::load_raw_abc_music_for_editor(path)?;
+    let raw = chip8::load_raw_abc_music_for_editor(path)?;
     let mut song = build_editable_song_from_raw(raw);
     apply_step_directives(&mut song, &step_directives);
     song.comments = comments;
@@ -52,7 +52,7 @@ fn load_comments_and_step_directives(path: &Path) -> (Vec<String>, Vec<StepDirec
     (comments, directives)
 }
 
-pub fn build_editable_song_from_raw(raw: ffi::RawAbcMusicForEditor) -> EditableSong {
+pub fn build_editable_song_from_raw(raw: chip8::RawAbcMusicForEditor) -> EditableSong {
     let instruments = raw
         .instruments
         .into_iter()

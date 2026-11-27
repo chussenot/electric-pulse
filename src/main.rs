@@ -1,7 +1,7 @@
 mod app;
 mod audio_engine;
+mod chip8;
 mod editor;
-mod ffi;
 mod playback;
 
 use app::ElectricPulseGuiApp;

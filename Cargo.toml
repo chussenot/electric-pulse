@@ -7,6 +7,8 @@ edition = "2024"
 cpal = "0.17.3"
 eframe = { version = "0.29", features = ["__screenshot", "glow"] }
 egui = "0.29"
-
-[build-dependencies]
-cc = "1.1"
+# The sound engine: render, parse, jam and MIDI export
+# (docs/adr/adr-0004-sonomorph-engine.md). A path into the submodule, so the
+# Rust GUI and the C tools (Makefile, scripts/) build the same pinned engine.
+# `jam` and `midi` both bring `render`, which compiles the C engine.
+sonomorph = { path = "vendor/sonomorph", features = ["jam", "midi"] }

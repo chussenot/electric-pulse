@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::ffi;
+use crate::chip8;
 
 // Showcase demos are discovered at runtime from data/music/*.abc.
 // Files whose stem starts with "menu" are skipped (those are UI sound effects,
@@ -106,7 +106,7 @@ pub struct RenderState {
     pub stats: Option<AudioRenderStats>,
 }
 
-pub type AudioRenderStats = ffi::AudioRenderStats;
+pub type AudioRenderStats = chip8::AudioRenderStats;
 
 #[derive(Default)]
 pub struct GuiAudioEngine;
@@ -122,7 +122,7 @@ impl GuiAudioEngine {
             .into_iter()
             .map(|name| {
                 let path = root.join("data").join("music").join(format!("{name}.abc"));
-                match ffi::load_demo_overview(&path) {
+                match chip8::load_demo_overview(&path) {
                     Ok(overview) => DemoEntry {
                         key: name,
                         path,
@@ -141,11 +141,11 @@ impl GuiAudioEngine {
     }
 
     pub fn render_demo(&self, demo_key: &str, path: &Path) -> Result<RenderState, String> {
-        let samples = Arc::<[u8]>::from(ffi::render_abc_file(path)?);
+        let (samples, stats) = chip8::render_abc_file(path)?;
         Ok(RenderState {
             demo_key: demo_key.to_string(),
-            samples,
-            stats: ffi::get_render_stats(),
+            samples: Arc::<[u8]>::from(samples),
+            stats: Some(stats),
         })
     }
 }
@@ -206,7 +206,7 @@ mod tests {
 
     #[test]
     fn jam_session_renders_distinct_sections() {
-        use crate::ffi::JamSession;
+        use crate::chip8::JamSession;
 
         let engine = GuiAudioEngine::new();
         let demo = engine
@@ -237,7 +237,7 @@ mod tests {
         // Mirrors the GUI's worker pattern: spawn a thread that owns the
         // session, push sections through a bounded channel, consume from
         // the main thread.
-        use crate::ffi::{JamSection, JamSession};
+        use crate::chip8::{JamSection, JamSession};
         use std::sync::mpsc;
 
         let engine = GuiAudioEngine::new();
@@ -356,7 +356,7 @@ mod tests {
         )
         .expect("should write invalid abc fixture");
 
-        let result = std::panic::catch_unwind(|| crate::ffi::load_demo_overview(&invalid_path));
+        let result = std::panic::catch_unwind(|| crate::chip8::load_demo_overview(&invalid_path));
         let _ = fs::remove_file(&invalid_path);
 
         assert!(result.is_ok(), "invalid abc must not panic");
