@@ -55,7 +55,7 @@ Editable routing and bus controls:
 
 ## Data source
 
-- Browser mode: `src/ffi.rs` overview structs (`TrackOverview`, `FxBusOverview`)
+- Browser mode: `src/chip8.rs` overview structs (`TrackOverview`, `FxBusOverview`)
 - Edit/Preview: `EditableSong` instrument/fx structures in `src/editor/model.rs`
 
 ## Explicit non-goals

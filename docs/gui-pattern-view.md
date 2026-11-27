@@ -26,7 +26,7 @@ The pattern overview is a read-only tracker-style map of arrangement and step ac
 
 ## Data model
 
-`ffi::load_demo_overview()` builds:
+`chip8::load_demo_overview()` builds:
 
 ```text
 DemoOverview {

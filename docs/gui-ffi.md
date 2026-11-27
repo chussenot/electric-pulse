@@ -1,20 +1,27 @@
-# Electric Pulse GUI FFI and Playback Boundary
+# Electric Pulse GUI Engine and Playback Boundary
 
-## Rust/C boundary
+## Engine boundary
 
-Only `src/ffi.rs` crosses the unsafe boundary.
+The engine is Sonomorph's `chip8` module, pinned at `vendor/sonomorph`
+([ADR-0004](adr/adr-0004-sonomorph-engine.md)). Sonomorph owns every
+`unsafe` call into the C engine; Electric Pulse has none.
 
-Rust calls:
+`src/chip8.rs` is the only module that calls Sonomorph:
 
-- `audio_engine_render_abc_file(path, sample_rate, out_len, out_stats)`
-- `audio_engine_free_buffer(buffer)`
-- `abc_load(path, music_out)`
+| Call | Used for |
+|---|---|
+| `chip8::render_file_u8(path, 22_050)` | Rendering a demo or the editor's preview: U8 PCM and its `RenderStats` |
+| `chip8::Song::load(path)` | The browser's overview and the editor's song, before any render |
+| `chip8::JamSession` | Jam mode, on its worker thread |
+| `chip8::export_midi(abc, out)` | MIDI export (off the render path, ADR-0003) |
 
-No UI code performs direct FFI calls.
+No UI code calls Sonomorph directly.
 
 ## Metadata extraction
 
-`abc_load` is used to build the read-only GUI overview before any render occurs. The FFI layer converts `AbcMusic` into:
+`Song::load` returns owned Rust values: title, tempo, swing, instruments,
+patterns, arrangement, FX buses, and each voice with its frequency on every
+step. `src/chip8.rs` converts a `Song` into:
 
 - `DemoOverview`
 - `TrackOverview`
@@ -22,22 +29,20 @@ No UI code performs direct FFI calls.
 - `PatternBlock`
 - `StepState`
 
-This is where waveform names, inferred beat markers, arrangement blocks, and bus details are normalized for the GUI.
+and, for the editor, into `RawAbcMusicForEditor`. This is where waveform
+names, inferred beat markers, arrangement blocks, the GUI's eight visible
+lanes, and bus defaults are normalized for the GUI.
 
 ## Memory ownership
 
-Rendered PCM is allocated by the C engine.
-
-1. Rust validates the path and converts it to a C string.
-2. Rust calls the C renderer.
-3. The returned raw pointer is wrapped in an owned helper with `Drop`.
-4. PCM is copied into Rust-owned memory.
-5. The original C allocation is always freed.
-6. The latest `AudioRenderStats` snapshot is cached for the UI.
+Sonomorph copies the engine's PCM into a `Vec<u8>` and frees the C
+allocation before returning, so the GUI only ever holds Rust-owned memory.
+`render_abc_file` returns the samples together with their `RenderStats`;
+there is no shared "last render" state.
 
 ## Playback boundary
 
-`src/playback.rs` is intentionally outside the FFI layer.
+`src/playback.rs` is intentionally outside the engine boundary.
 
 - rendered PCM is copied into Rust-owned memory and streamed directly with `cpal`
 - playback progress is tracked from consumed sample cursor over full render length
@@ -47,4 +52,4 @@ Rendered PCM is allocated by the C engine.
 
 - playback depends on host output device availability and a valid default stream config
 - no separate low-latency GUI mixer is introduced; playback is output-stream only
-- metadata is for inspection only; the GUI never edits the C structures
+- metadata is for inspection only; the GUI never edits engine structures

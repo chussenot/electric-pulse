@@ -11,21 +11,17 @@ description = "Remove compiled binaries"
 run = "scripts/clean.sh"
 
 [tasks.test]
-description = "Run the full test suite (audio DSP, ABC, sequencer)"
-depends = ["test-audio", "test-abc", "test-audio-seq"]
+description = "Run the full test suite (the engine's own tests, ABC + showcase)"
+depends = ["test-engine", "test-abc"]
 run = "echo 'All tests passed.'"
 
-[tasks.test-audio]
-description = "Build and run audio DSP regression tests"
-run = "scripts/test-audio.sh"
+[tasks.test-engine]
+description = "Run the engine's own tests (Sonomorph chip8 at the pinned commit: DSP, sequencer, FX, render)"
+run = "scripts/test-engine.sh"
 
 [tasks.test-abc]
 description = "Build and run ABC parser + showcase regression tests"
 run = "scripts/test-abc.sh"
-
-[tasks.test-audio-seq]
-description = "Build and run sequencer regression tests"
-run = "scripts/test-audio-seq.sh"
 
 [tasks.bench-audio]
 description = "Build and run the audio microbenchmark"

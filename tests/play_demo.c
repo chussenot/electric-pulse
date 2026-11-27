@@ -3,8 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../src/audio_engine.h"
-#include "../src/electric_pulse.h"
+#include "audio_engine.h"
+#include "electric_pulse.h"
 
 typedef struct {
     const char *name;

@@ -1,4 +1,4 @@
-#include "../src/audio_dsp.h"
+#include "audio_dsp.h"
 
 #include <stdio.h>
 #include <stdlib.h>

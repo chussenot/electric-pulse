@@ -1,6 +1,6 @@
 # Audio FX
 
-`src/audio_fx.c` owns the bus FX layer used by the shared renderer.
+`audio_fx.c` (in `vendor/sonomorph/engine/chip8/`) owns the bus FX layer used by the shared renderer.
 
 ## Responsibilities
 
@@ -10,7 +10,7 @@
 - sidechain ducking
 - clipping statistics helper used by render diagnostics
 
-`src/audio_mix.c` does **not** implement FX processing logic. It only routes dry track output and FX sends/returns.
+`audio_mix.c` does **not** implement FX processing logic. It only routes dry track output and FX sends/returns.
 
 ## Bus signal flow
 

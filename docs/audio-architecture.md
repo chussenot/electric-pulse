@@ -2,9 +2,16 @@
 
 Electric Pulse now renders built-in songs and ABC tracks through the same portable engine path.
 
+The engine is Sonomorph's `chip8` module, pinned as the `vendor/sonomorph`
+submodule ([ADR-0004](adr/adr-0004-sonomorph-engine.md)); its sources are in
+`vendor/sonomorph/engine/chip8/`. Engine changes are made in Sonomorph, then pinned
+here. The Rust GUI reaches it through `sonomorph::chip8` (see
+[gui-ffi.md](gui-ffi.md)); the C tools (tests, demo renderer, MCP server, jam
+player) compile its sources directly.
+
 ## Public API
 
-Declared in `src/electric_pulse.h`:
+Declared in `vendor/sonomorph/engine/chip8/electric_pulse.h` and `audio_engine.h`:
 
 - `audio_engine_render_builtin_menu()`
 - `audio_engine_render_abc_file()`
@@ -31,12 +38,14 @@ flowchart TD
 
 ## Modules
 
-- `src/audio_engine.c`: stable render entry points, ownership rules, render statistics
-- `src/abc.c`: ABC parsing, DSL validation, legacy ABC compatibility, `AbcMusic -> SeqSong`
-- `src/audio_song_builtin.c`: built-in menu `SeqSong`
-- `src/audio_seq.c`: deterministic timeline compilation and step event collection
-- `src/audio_mix.c`: voice allocation, oscillators, instruments, note events, track mixing
-- `src/audio_fx.c`: delay, drive, low-pass, sidechain, clipping statistics helper
+In `vendor/sonomorph/engine/chip8/`:
+
+- `audio_engine.c`: stable render entry points, ownership rules, render statistics
+- `abc.c`: ABC parsing, DSL validation, legacy ABC compatibility, `AbcMusic -> SeqSong`
+- `audio_song_builtin.c`: built-in menu `SeqSong`
+- `audio_seq.c`: deterministic timeline compilation and step event collection
+- `audio_mix.c`: voice allocation, oscillators, instruments, note events, track mixing
+- `audio_fx.c`: delay, drive, low-pass, sidechain, clipping statistics helper
 
 ## Diagnostics
 

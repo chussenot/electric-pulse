@@ -112,7 +112,7 @@ Focus areas now include:
 
 Editable preview render stays on the existing C engine path:
 
-`EditableSong -> ABC DSL -> ffi::render_abc_file -> PCM`
+`EditableSong -> ABC DSL -> chip8::render_abc_file -> PCM`
 
 No second Rust audio engine is introduced.
 

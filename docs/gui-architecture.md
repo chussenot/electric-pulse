@@ -23,10 +23,9 @@ This GUI keeps Electric Pulse terminal-first while providing a polished read-onl
 ```mermaid
 flowchart LR
     APP[src/app.rs] --> ADAPTER[src/audio_engine.rs]
-    ADAPTER --> FFI[src/ffi.rs]
-    FFI --> C_ENGINE[src/audio_engine.c]
-    FFI --> ABC[src/abc.c]
-    C_ENGINE --> MIX[src/audio_mix.c + src/audio_fx.c]
+    ADAPTER --> CHIP8[src/chip8.rs]
+    CHIP8 --> SONOMORPH[sonomorph::chip8<br/>vendor/sonomorph]
+    SONOMORPH --> C_ENGINE[engine/chip8: render, parse, mix, FX]
     APP --> PLAYBACK[src/playback.rs]
 ```
 

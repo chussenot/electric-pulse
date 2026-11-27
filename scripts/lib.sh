@@ -9,15 +9,29 @@
 
 BIN_DIR="bin"
 
-# Engine sources shared by every full-engine consumer (tests, demos, MCP, jam).
-ENGINE_SRC="src/abc.c src/audio_mix.c src/audio_seq.c src/audio_dsp.c src/audio_fx.c src/audio_song_builtin.c src/audio_engine.c"
+# The engine is Sonomorph's chip8, pinned as the vendor/sonomorph submodule
+# (docs/adr/adr-0004-sonomorph-engine.md). Its headers and sources live here.
+ENGINE_DIR="vendor/sonomorph/engine/chip8"
 
-# Compile a C target. Usage: cc_build <output> <source...>
+# Engine sources shared by every full-engine consumer (tests, demos, MCP, jam).
+ENGINE_SRC="$ENGINE_DIR/abc.c $ENGINE_DIR/audio_mix.c $ENGINE_DIR/audio_seq.c $ENGINE_DIR/audio_dsp.c $ENGINE_DIR/audio_fx.c $ENGINE_DIR/audio_song_builtin.c $ENGINE_DIR/audio_engine.c"
+
+# Stop with the fix when the submodule was never checked out.
+require_engine() {
+	if [ ! -f "$ENGINE_DIR/abc.c" ]; then
+		echo "vendor/sonomorph is empty: run 'git submodule update --init'" >&2
+		exit 1
+	fi
+}
+
+# Compile a C target against the engine's headers.
+# Usage: cc_build <output> <source...>
 # CFLAGS / LDFLAGS are word-split on purpose so callers can pass multiple flags.
 cc_build() {
+	require_engine
 	out="$1"
 	shift
 	mkdir -p "$(dirname "$out")"
 	# shellcheck disable=SC2086
-	$CC $CFLAGS -o "$out" "$@" $LDFLAGS
+	$CC $CFLAGS -I"$ENGINE_DIR" -o "$out" "$@" $LDFLAGS
 }

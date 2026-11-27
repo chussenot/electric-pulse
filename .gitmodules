@@ -1,0 +1,3 @@
+[submodule "vendor/sonomorph"]
+	path = vendor/sonomorph
+	url = https://github.com/chussenot/sonomorph
